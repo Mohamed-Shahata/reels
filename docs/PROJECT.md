@@ -348,7 +348,7 @@ Acceptance: the API can generate an upload signature.
 
 ### Phase 1: Authentication
 
-Status: 1.1 to 1.6 done.
+Status: 1.1 to 1.6 and 2.1 to 2.3 done.
 
 **1.1 Registration**
 Endpoint with email validation, password rules and argon2 hashing. Reject duplicate emails.

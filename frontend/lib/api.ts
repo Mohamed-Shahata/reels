@@ -7,11 +7,34 @@ const userSchema = z.object({
   createdAt: z.string(),
 });
 
+const uploadSignatureSchema = z.object({
+  uploadUrl: z.url(),
+  cloudName: z.string(),
+  apiKey: z.string(),
+  timestamp: z.number(),
+  signature: z.string(),
+  publicId: z.string(),
+  folder: z.string(),
+  resourceType: z.literal('video'),
+  uploadPreset: z.string().optional(),
+});
+
+const createVideoSchema = z.object({
+  video: z.object({
+    id: z.string(),
+    title: z.string(),
+    status: z.literal('UPLOADING'),
+    createdAt: z.string(),
+  }),
+  upload: uploadSignatureSchema,
+});
+
 const errorSchema = z.object({
   message: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
 export type User = z.infer<typeof userSchema>;
+export type CreateVideoUpload = z.infer<typeof createVideoSchema>;
 
 export class ApiError extends Error {
   constructor(
@@ -72,4 +95,13 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   logout: () => request('/auth/logout', z.undefined(), { method: 'POST' }),
+  createVideo: (title: string) =>
+    request('/videos', createVideoSchema, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    }),
+  getVideoUploadSignature: (videoId: string) =>
+    request(`/videos/${videoId}/upload-signature`, uploadSignatureSchema, {
+      method: 'POST',
+    }),
 };

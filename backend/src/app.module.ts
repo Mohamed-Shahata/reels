@@ -5,6 +5,7 @@ import { AppConfigModule } from './config/app-config.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
+import { VideosModule } from './videos/videos.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { StorageModule } from './storage/storage.module';
     StorageModule,
     HealthModule,
     AuthModule,
+    VideosModule,
   ],
 })
 export class AppModule implements NestModule {

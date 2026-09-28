@@ -12,13 +12,23 @@ export interface StoredSession {
   expiresAt: Date;
 }
 
+export interface StoredVideo {
+  id: string;
+  userId: string;
+  title: string;
+  status: 'UPLOADING';
+  createdAt: Date;
+}
+
 export function createPrismaFake() {
   const store: StoredUser[] = [];
   const sessions: StoredSession[] = [];
+  const videos: StoredVideo[] = [];
 
   return {
     store,
     sessions,
+    videos,
     $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     $connect: jest.fn(),
     $disconnect: jest.fn(),
@@ -121,6 +131,52 @@ export function createPrismaFake() {
             email: user.email,
             createdAt: user.createdAt,
           });
+        },
+      ),
+    },
+    video: {
+      create: jest.fn(
+        ({
+          data,
+          select,
+        }: {
+          data: { userId: string; title: string };
+          select: Record<string, boolean>;
+        }) => {
+          const video: StoredVideo = {
+            id: `video-${videos.length + 1}`,
+            status: 'UPLOADING',
+            createdAt: new Date(),
+            ...data,
+          };
+          videos.push(video);
+          return Promise.resolve(
+            Object.fromEntries(
+              Object.entries(video).filter(([key]) => select[key]),
+            ),
+          );
+        },
+      ),
+      findFirst: jest.fn(
+        ({
+          where,
+          select,
+        }: {
+          where: { id: string; userId: string; status: 'UPLOADING' };
+          select: Record<string, boolean>;
+        }) => {
+          const video = videos.find(
+            (item) =>
+              item.id === where.id &&
+              item.userId === where.userId &&
+              item.status === where.status,
+          );
+          if (!video) return Promise.resolve(null);
+          return Promise.resolve(
+            Object.fromEntries(
+              Object.entries(video).filter(([key]) => select[key]),
+            ),
+          );
         },
       ),
     },

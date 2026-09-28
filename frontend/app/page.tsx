@@ -1,6 +1,7 @@
 'use client';
 
 import { useAuth } from '@/components/auth/auth-provider';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
@@ -46,14 +47,27 @@ export default function Home() {
         </div>
       </header>
       <section className="mx-auto flex min-h-[calc(100vh-4rem)] max-w-5xl items-center px-5 py-12 sm:px-8">
-        <div>
+        <div className="w-full">
           <p className="text-sm font-medium text-[#0f766e]">Workspace</p>
-          <h1 className="mt-3 text-3xl font-semibold sm:text-4xl">
-            You are signed in.
-          </h1>
-          <p className="mt-3 text-base text-[#5f6e69]">
-            Your workspace is ready for the next phase.
-          </p>
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-5">
+            <div>
+              <h1 className="text-3xl font-semibold sm:text-4xl">
+                Your videos
+              </h1>
+              <p className="mt-3 text-base text-[#5f6e69]">
+                Upload a podcast to start creating clips.
+              </p>
+            </div>
+            <Link
+              className="inline-flex h-11 items-center bg-[#0f766e] px-5 text-sm font-semibold text-white transition hover:bg-[#0b615b]"
+              href="/videos/new"
+            >
+              Upload video
+            </Link>
+          </div>
+          <div className="mt-12 border-y border-[#d8e1dc] py-10 text-sm text-[#5f6e69]">
+            No videos uploaded yet.
+          </div>
         </div>
       </section>
     </main>

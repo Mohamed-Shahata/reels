@@ -52,6 +52,62 @@ describe('api', () => {
     );
   });
 
+  it('creates a video record before starting a direct upload', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        video: { ...user, title: 'Episode 42', status: 'UPLOADING' },
+        upload: {
+          uploadUrl: 'https://api.cloudinary.com/v1_1/demo/video/upload',
+          cloudName: 'demo',
+          apiKey: 'key',
+          timestamp: 1,
+          signature: 'signature',
+          publicId: 'videos/user-1/video-1',
+          folder: 'podcast-reels',
+          resourceType: 'video',
+        },
+      }),
+    );
+
+    await expect(api.createVideo('Episode 42')).resolves.toMatchObject({
+      video: { id: 'user-1', title: 'Episode 42', status: 'UPLOADING' },
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/videos$/),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({ title: 'Episode 42' }),
+      }),
+    );
+  });
+
+  it('requests a fresh signature when resuming a pending upload', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        uploadUrl: 'https://api.cloudinary.com/v1_1/demo/video/upload',
+        cloudName: 'demo',
+        apiKey: 'key',
+        timestamp: 2,
+        signature: 'fresh-signature',
+        publicId: 'videos/user-1/video-1',
+        folder: 'podcast-reels',
+        resourceType: 'video',
+      }),
+    );
+
+    await expect(api.getVideoUploadSignature('video-1')).resolves.toMatchObject(
+      {
+        publicId: 'videos/user-1/video-1',
+        signature: 'fresh-signature',
+      },
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/videos\/video-1\/upload-signature$/),
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+  });
+
   it('surfaces the API error message to the form layer', async () => {
     fetchMock.mockResolvedValue(
       response({ message: 'Invalid email or password' }, 401),
