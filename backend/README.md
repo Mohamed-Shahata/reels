@@ -22,5 +22,7 @@ NestJS API for the Podcast Reels platform.
 - `src/common`: exception filter, validation pipe, request logging
 - `src/prisma`: Prisma service and module
 - `src/health`: health check endpoint
+- `src/auth`: registration, login, sessions, refresh rotation, logout, global JWT guard, rate limiting
+- `src/users`: user persistence
 - `src/storage`: Cloudinary wrapper and upload signature
 - `prisma`: schema and migrations

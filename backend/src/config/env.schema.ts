@@ -17,6 +17,11 @@ export const envSchema = z.object({
       .map((origin) => origin.trim())
       .filter(Boolean),
   ),
+  JWT_ACCESS_SECRET: z.string().min(32, 'must be at least 32 characters'),
+  ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().min(60).default(900),
+  REFRESH_TOKEN_TTL_SEC: z.coerce.number().int().min(3600).default(2592000),
+  AUTH_RATE_LIMIT_TTL_SEC: z.coerce.number().int().min(1).default(60),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   CLOUDINARY_CLOUD_NAME: nonEmpty,
   CLOUDINARY_API_KEY: nonEmpty,
   CLOUDINARY_API_SECRET: nonEmpty,

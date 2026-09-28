@@ -184,6 +184,14 @@ All routes are prefixed with `/api/v1`. All request bodies are validated. All er
 | POST | `/auth/logout` | Revoke the current session |
 | GET | `/auth/me` | Get the current user |
 
+Login sets `access_token` and `refresh_token` as httpOnly cookies (`secure` in production, `sameSite=lax`); the refresh cookie is scoped to `/api/v1/auth`. Tokens are never returned in the response body. Wrong email or password returns a generic `401`.
+
+Refresh rotates the refresh token on every call and returns `204` with new cookies. Each refresh token is single use: presenting an already rotated token revokes the whole session (reuse detection) and returns `401`, and there is no grace window, so concurrent refreshes with the same token count as reuse. Failed refreshes clear both cookies. Logout revokes the session of the presented refresh token, clears the cookies and always returns `204`. `GET /auth/me` requires a valid access token whose session is still active, so logout takes effect immediately.
+
+Every route requires a valid session by default (global JWT guard). Routes opt out with the `@Public()` decorator; today only `register`, `login`, `refresh`, `logout` and `health` are public. Register, login, refresh and logout are rate limited per client IP and per route, and return `429` with a `Retry-After` header when the limit is exceeded. `GET /auth/me` is not rate limited. Behind a reverse proxy, enable Express `trust proxy` so the client IP is read correctly.
+
+Registration rules: `email` is trimmed, lowercased and must be a valid address (max 254 characters). `password` must be 8 to 128 characters and contain at least one letter and one number. Duplicate emails return `409`. The response is `{ id, email, createdAt }` and never includes the password or its hash.
+
 ### Videos
 
 | Method | Route | Description |
@@ -243,7 +251,45 @@ The clipping screen must support: entering start and end time as `mm:ss`, settin
 - Every comment is written in English.
 - Commented-out code is never committed.
 
-### 7.3 Code style
+### 7.3 Backend structure
+
+`backend/src` contains production code only. Every test lives under `backend/test`, grouped by test type and then by the source module it covers.
+
+```text
+backend/
+  src/
+    auth/
+      dto/
+    common/
+      filters/
+      middleware/
+      pipes/
+    config/
+    health/
+    prisma/
+    storage/
+    users/
+  test/
+    unit/
+      app/
+      auth/
+      common/
+        filters/
+      config/
+      storage/
+    e2e/
+    support/
+    setup-env.ts
+    jest-e2e.json
+```
+
+- Add a unit test at `test/unit/<module>/<file>.spec.ts`; its directory mirrors the module under `src`.
+- Add an end-to-end test at `test/e2e/<feature>.e2e-spec.ts`.
+- Put shared fakes, fixtures and test helpers in `test/support`; do not place them in `src`.
+- Production files never use `.spec.ts` or `.e2e-spec.ts` names.
+- `npm test` runs unit tests only. `npm run test:e2e` runs end-to-end tests only.
+
+### 7.4 Code style
 
 - TypeScript strict mode on both apps. No `any` without a strong reason.
 - DTO validation with `class-validator` in NestJS, shared schemas with `zod` on the frontend.
@@ -252,13 +298,13 @@ The clipping screen must support: entering start and end time as `mm:ss`, settin
 - Environment variables are validated at startup. Secrets are never committed.
 - ESLint and Prettier are mandatory and enforced in CI.
 
-### 7.4 Git
+### 7.5 Git
 
 - Branch per task: `feat/<task-id>-short-name`.
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `chore:`, `docs:`, `test:`.
 - Small pull requests. One task per pull request when possible.
 
-### 7.5 Definition of done
+### 7.6 Definition of done
 
 A task is done only when:
 
@@ -301,6 +347,8 @@ Create the Cloudinary account, configure credentials and an upload preset for vi
 Acceptance: the API can generate an upload signature.
 
 ### Phase 1: Authentication
+
+Status: 1.1 to 1.4 done.
 
 **1.1 Registration**
 Endpoint with email validation, password rules and argon2 hashing. Reject duplicate emails.
@@ -602,6 +650,11 @@ Backend (`backend/.env`):
 | `PORT` | no | API port (default `4000`) |
 | `DATABASE_URL` | yes | PostgreSQL connection string |
 | `CORS_ORIGIN` | yes | Comma-separated list of allowed frontend origins |
+| `JWT_ACCESS_SECRET` | yes | Secret for signing access tokens (at least 32 characters) |
+| `ACCESS_TOKEN_TTL_SEC` | no | Access token lifetime in seconds (default `900`) |
+| `REFRESH_TOKEN_TTL_SEC` | no | Refresh token and session lifetime in seconds (default `2592000`) |
+| `AUTH_RATE_LIMIT_TTL_SEC` | no | Rate limit window for auth routes in seconds (default `60`) |
+| `AUTH_RATE_LIMIT_MAX` | no | Requests allowed per window, per client and per route (default `10`) |
 | `CLOUDINARY_CLOUD_NAME` | yes | Cloudinary cloud name |
 | `CLOUDINARY_API_KEY` | yes | Cloudinary API key |
 | `CLOUDINARY_API_SECRET` | yes | Cloudinary API secret (server only) |

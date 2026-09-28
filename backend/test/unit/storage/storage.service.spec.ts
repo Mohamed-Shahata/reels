@@ -1,7 +1,7 @@
 import { ConfigService } from '@nestjs/config';
 import { createHash } from 'node:crypto';
-import type { Env } from '../config/env.schema';
-import { StorageService } from './storage.service';
+import type { Env } from '../../../src/config/env.schema';
+import { StorageService } from '../../../src/storage/storage.service';
 
 function createService(overrides: Partial<Env> = {}): StorageService {
   const values: Record<string, unknown> = {

@@ -5,3 +5,6 @@ process.env.CORS_ORIGIN = 'http://localhost:3000';
 process.env.CLOUDINARY_CLOUD_NAME = 'test-cloud';
 process.env.CLOUDINARY_API_KEY = 'test-key';
 process.env.CLOUDINARY_API_SECRET = 'test-secret';
+process.env.JWT_ACCESS_SECRET = 'test-access-secret-at-least-32-characters';
+process.env.AUTH_RATE_LIMIT_TTL_SEC = '60';
+process.env.AUTH_RATE_LIMIT_MAX = '1000';

@@ -4,6 +4,7 @@ import {
   Logger,
   ServiceUnavailableException,
 } from '@nestjs/common';
+import { Public } from '../auth/public.decorator';
 import { PrismaService } from '../prisma/prisma.service';
 
 export interface HealthStatus {
@@ -19,6 +20,7 @@ export class HealthController {
 
   constructor(private readonly prisma: PrismaService) {}
 
+  @Public()
   @Get()
   async check(): Promise<HealthStatus> {
     try {

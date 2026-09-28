@@ -3,10 +3,11 @@ import { Test } from '@nestjs/testing';
 import { IsEmail, IsString, MinLength } from 'class-validator';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { AppModule } from '../src/app.module';
-import { configureApp } from '../src/app.setup';
-import type { ErrorResponseBody } from '../src/common/filters/all-exceptions.filter';
-import { PrismaService } from '../src/prisma/prisma.service';
+import { AppModule } from '../../src/app.module';
+import { Public } from '../../src/auth/public.decorator';
+import { configureApp } from '../../src/app.setup';
+import type { ErrorResponseBody } from '../../src/common/filters/all-exceptions.filter';
+import { PrismaService } from '../../src/prisma/prisma.service';
 
 class SampleDto {
   @IsEmail()
@@ -17,6 +18,7 @@ class SampleDto {
   password!: string;
 }
 
+@Public()
 @Controller('sample')
 class SampleController {
   @Post()

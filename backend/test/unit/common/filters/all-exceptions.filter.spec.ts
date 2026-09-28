@@ -7,7 +7,7 @@ import {
 import {
   AllExceptionsFilter,
   ErrorResponseBody,
-} from './all-exceptions.filter';
+} from '../../../../src/common/filters/all-exceptions.filter';
 
 function createHost() {
   const json = jest.fn<void, [ErrorResponseBody]>();
