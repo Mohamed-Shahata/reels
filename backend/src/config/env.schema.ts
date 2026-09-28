@@ -27,6 +27,33 @@ export const envSchema = z.object({
   CLOUDINARY_API_SECRET: nonEmpty,
   CLOUDINARY_UPLOAD_PRESET: nonEmpty.optional(),
   CLOUDINARY_UPLOAD_FOLDER: nonEmpty.default('podcast-reels'),
+  VIDEO_ALLOWED_FORMATS: nonEmpty
+    .default('mp4,mov,webm')
+    .transform((value) =>
+      value
+        .split(',')
+        .map((format) => format.trim().toLowerCase())
+        .filter(Boolean),
+    )
+    .refine(
+      (formats) => formats.length > 0,
+      'must include at least one format',
+    ),
+  VIDEO_MAX_SIZE_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(5 * 1024 * 1024 * 1024),
+  VIDEO_MAX_DURATION_SEC: z.coerce
+    .number()
+    .positive()
+    .default(4 * 60 * 60),
+  STALE_UPLOAD_THRESHOLD_SEC: z.coerce.number().int().min(60).default(86400),
+  STALE_UPLOAD_CLEANUP_INTERVAL_SEC: z.coerce
+    .number()
+    .int()
+    .min(60)
+    .default(3600),
 });
 
 export type Env = z.infer<typeof envSchema>;

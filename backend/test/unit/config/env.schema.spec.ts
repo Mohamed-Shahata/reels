@@ -20,6 +20,11 @@ describe('validateEnv', () => {
     expect(env.AUTH_RATE_LIMIT_TTL_SEC).toBe(60);
     expect(env.AUTH_RATE_LIMIT_MAX).toBe(10);
     expect(env.CLOUDINARY_UPLOAD_FOLDER).toBe('podcast-reels');
+    expect(env.VIDEO_ALLOWED_FORMATS).toEqual(['mp4', 'mov', 'webm']);
+    expect(env.VIDEO_MAX_SIZE_BYTES).toBe(5 * 1024 * 1024 * 1024);
+    expect(env.VIDEO_MAX_DURATION_SEC).toBe(4 * 60 * 60);
+    expect(env.STALE_UPLOAD_THRESHOLD_SEC).toBe(86400);
+    expect(env.STALE_UPLOAD_CLEANUP_INTERVAL_SEC).toBe(3600);
     expect(env.CORS_ORIGIN).toEqual([
       'http://localhost:3000',
       'https://app.example.com',
@@ -55,5 +60,21 @@ describe('validateEnv', () => {
     expect(() =>
       validateEnv({ ...validEnv, AUTH_RATE_LIMIT_MAX: '0' }),
     ).toThrow(/AUTH_RATE_LIMIT_MAX/);
+  });
+
+  it('normalizes configured video formats and rejects invalid limits', () => {
+    expect(
+      validateEnv({ ...validEnv, VIDEO_ALLOWED_FORMATS: 'MP4, webm ' })
+        .VIDEO_ALLOWED_FORMATS,
+    ).toEqual(['mp4', 'webm']);
+    expect(() =>
+      validateEnv({ ...validEnv, VIDEO_MAX_SIZE_BYTES: '0' }),
+    ).toThrow(/VIDEO_MAX_SIZE_BYTES/);
+    expect(() =>
+      validateEnv({ ...validEnv, VIDEO_MAX_DURATION_SEC: '0' }),
+    ).toThrow(/VIDEO_MAX_DURATION_SEC/);
+    expect(() =>
+      validateEnv({ ...validEnv, STALE_UPLOAD_THRESHOLD_SEC: '59' }),
+    ).toThrow(/STALE_UPLOAD_THRESHOLD_SEC/);
   });
 });

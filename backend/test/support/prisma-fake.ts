@@ -16,8 +16,12 @@ export interface StoredVideo {
   id: string;
   userId: string;
   title: string;
-  status: 'UPLOADING';
+  status: 'UPLOADING' | 'READY' | 'FAILED';
   createdAt: Date;
+  updatedAt: Date;
+  cloudinaryId?: string;
+  durationSec?: number;
+  sizeBytes?: bigint;
 }
 
 export function createPrismaFake() {
@@ -143,10 +147,12 @@ export function createPrismaFake() {
           data: { userId: string; title: string };
           select: Record<string, boolean>;
         }) => {
+          const now = new Date();
           const video: StoredVideo = {
             id: `video-${videos.length + 1}`,
             status: 'UPLOADING',
-            createdAt: new Date(),
+            createdAt: now,
+            updatedAt: now,
             ...data,
           };
           videos.push(video);
@@ -162,14 +168,26 @@ export function createPrismaFake() {
           where,
           select,
         }: {
-          where: { id: string; userId: string; status: 'UPLOADING' };
+          where: {
+            id: string;
+            userId: string;
+            status?:
+              | 'UPLOADING'
+              | 'READY'
+              | 'FAILED'
+              | { in: ('UPLOADING' | 'READY' | 'FAILED')[] };
+          };
           select: Record<string, boolean>;
         }) => {
           const video = videos.find(
             (item) =>
               item.id === where.id &&
               item.userId === where.userId &&
-              item.status === where.status,
+              (where.status === undefined ||
+                (typeof where.status === 'string' &&
+                  item.status === where.status) ||
+                (typeof where.status === 'object' &&
+                  where.status.in.includes(item.status))),
           );
           if (!video) return Promise.resolve(null);
           return Promise.resolve(
@@ -179,6 +197,103 @@ export function createPrismaFake() {
           );
         },
       ),
+      findMany: jest.fn(
+        ({
+          where,
+          select,
+        }: {
+          where: {
+            userId?: string;
+            status?: 'UPLOADING' | 'READY' | 'FAILED';
+            updatedAt?: { lt: Date };
+          };
+          orderBy?: { createdAt: 'desc' };
+          select: Record<string, boolean>;
+        }) =>
+          Promise.resolve(
+            videos
+              .filter(
+                (video) =>
+                  (where.userId === undefined ||
+                    video.userId === where.userId) &&
+                  (where.status === undefined ||
+                    video.status === where.status) &&
+                  (where.updatedAt === undefined ||
+                    video.updatedAt < where.updatedAt.lt),
+              )
+              .slice()
+              .sort(
+                (left, right) =>
+                  right.createdAt.getTime() - left.createdAt.getTime(),
+              )
+              .map((video) =>
+                Object.fromEntries(
+                  Object.entries(video).filter(([key]) => select[key]),
+                ),
+              ),
+          ),
+      ),
+      update: jest.fn(
+        ({
+          where,
+          data,
+          select,
+        }: {
+          where: { id: string };
+          data: Partial<
+            Pick<
+              StoredVideo,
+              'cloudinaryId' | 'durationSec' | 'sizeBytes' | 'status' | 'title'
+            >
+          >;
+          select?: Record<string, boolean>;
+        }) => {
+          const video = videos.find((item) => item.id === where.id);
+          if (!video) throw new Error('Video not found');
+          Object.assign(video, data);
+          video.updatedAt = new Date();
+          return Promise.resolve(
+            select
+              ? Object.fromEntries(
+                  Object.entries(video).filter(([key]) => select[key]),
+                )
+              : video,
+          );
+        },
+      ),
+      updateMany: jest.fn(
+        ({
+          where,
+          data,
+        }: {
+          where: {
+            id: string;
+            userId?: string;
+            status: 'UPLOADING' | 'READY' | 'FAILED';
+            updatedAt?: { lt: Date };
+          };
+          data: { status: 'FAILED' };
+        }) => {
+          const video = videos.find(
+            (item) =>
+              item.id === where.id &&
+              (where.userId === undefined || item.userId === where.userId) &&
+              item.status === where.status &&
+              (where.updatedAt === undefined ||
+                item.updatedAt < where.updatedAt.lt),
+          );
+          if (video) {
+            Object.assign(video, data, { updatedAt: new Date() });
+          }
+          return Promise.resolve({ count: video ? 1 : 0 });
+        },
+      ),
+      delete: jest.fn(({ where }: { where: { id: string } }) => {
+        const index = videos.findIndex((item) => item.id === where.id);
+        if (index === -1) throw new Error('Video not found');
+        const [video] = videos.splice(index, 1);
+        return Promise.resolve(video);
+      }),
     },
   };
 }

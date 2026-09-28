@@ -6,6 +6,7 @@ export interface PendingUpload {
   title: string;
   uploadId: string;
   videoId: string;
+  cloudinaryPublicId?: string;
 }
 
 export function getFileFingerprint(file: File): string {
@@ -32,6 +33,29 @@ export function savePendingUpload(upload: PendingUpload): void {
 
 export function clearPendingUpload(file: File): void {
   window.localStorage.removeItem(key(getFileFingerprint(file)));
+}
+
+export function clearPendingUploadByVideoId(videoId: string): void {
+  try {
+    const keysToRemove: string[] = [];
+
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const storageKey = window.localStorage.key(index);
+      if (!storageKey?.startsWith(STORAGE_PREFIX)) continue;
+
+      const value = window.localStorage.getItem(storageKey);
+      if (!value) continue;
+
+      const upload = JSON.parse(value) as Partial<PendingUpload>;
+      if (upload.videoId === videoId) keysToRemove.push(storageKey);
+    }
+
+    keysToRemove.forEach((storageKey) =>
+      window.localStorage.removeItem(storageKey),
+    );
+  } catch {
+    // Invalid browser storage must not prevent deleting a video.
+  }
 }
 
 function key(fingerprint: string): string {

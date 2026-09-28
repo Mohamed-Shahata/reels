@@ -9,12 +9,19 @@ import {
   savePendingUpload,
   type PendingUpload,
 } from '@/lib/upload-store';
+import {
+  readVideoDuration,
+  validateVideoDuration,
+  validateVideoFile,
+} from '@/lib/video-validation';
 import { useAuth } from '@/components/auth/auth-provider';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import type { UploadConstraints } from '@/lib/api';
 
-type UploadState = 'idle' | 'creating' | 'uploading' | 'complete' | 'failed';
+type UploadState =
+  'idle' | 'creating' | 'uploading' | 'confirming' | 'complete' | 'failed';
 
 function titleFromFile(file: File): string {
   return file.name.replace(/\.[^.]+$/, '') || 'Untitled video';
@@ -33,13 +40,80 @@ export function UploadVideoForm() {
     null,
   );
   const [transferStatus, setTransferStatus] = useState('');
+  const [constraints, setConstraints] = useState<UploadConstraints | null>(
+    null,
+  );
 
   useEffect(() => {
     if (status === 'unauthenticated') router.replace('/login');
   }, [router, status]);
 
-  function selectFile(event: ChangeEvent<HTMLInputElement>) {
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+
+    api
+      .getVideoUploadConstraints()
+      .then(setConstraints)
+      .catch(() => setError('Upload settings could not be loaded.'));
+  }, [status]);
+
+  async function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] ?? null;
+
+    setError(null);
+    setTransferStatus('');
+    setState('idle');
+
+    if (!selected) {
+      setFile(null);
+      setTitle('');
+      setPendingUpload(null);
+      setProgress(0);
+      return;
+    }
+
+    if (!constraints) {
+      event.target.value = '';
+      setError('Upload settings are still loading. Try again in a moment.');
+      return;
+    }
+
+    const fileError = validateVideoFile(selected, constraints);
+    if (fileError) {
+      event.target.value = '';
+      setFile(null);
+      setPendingUpload(null);
+      setProgress(0);
+      setError(fileError);
+      return;
+    }
+
+    try {
+      const durationError = validateVideoDuration(
+        await readVideoDuration(selected),
+        constraints,
+      );
+      if (durationError) {
+        event.target.value = '';
+        setFile(null);
+        setPendingUpload(null);
+        setProgress(0);
+        setError(durationError);
+        return;
+      }
+    } catch (metadataError) {
+      event.target.value = '';
+      setFile(null);
+      setPendingUpload(null);
+      setProgress(0);
+      setError(
+        metadataError instanceof Error
+          ? metadataError.message
+          : 'This video metadata could not be read.',
+      );
+      return;
+    }
+
     const pending = selected ? loadPendingUpload(selected) : null;
     setFile(selected);
     setTitle(pending?.title ?? (selected ? titleFromFile(selected) : ''));
@@ -49,13 +123,10 @@ export function UploadVideoForm() {
         ? Math.round((pending.nextByte / selected.size) * 100)
         : 0,
     );
-    setError(null);
-    setTransferStatus('');
-    setState('idle');
   }
 
   async function startUpload() {
-    if (!file || !title.trim()) return;
+    if (!file || !title.trim() || !constraints) return;
 
     setError(null);
     setTransferStatus('');
@@ -68,8 +139,23 @@ export function UploadVideoForm() {
       let upload;
 
       if (activeUpload) {
-        upload = await api.getVideoUploadSignature(activeUpload.videoId);
-      } else {
+        try {
+          upload = await api.getVideoUploadSignature(activeUpload.videoId);
+        } catch (signatureError) {
+          if (
+            !(signatureError instanceof ApiError) ||
+            signatureError.status !== 404
+          ) {
+            throw signatureError;
+          }
+
+          clearPendingUpload(file);
+          setPendingUpload(null);
+          activeUpload = null;
+        }
+      }
+
+      if (!activeUpload) {
         const created = await api.createVideo(title.trim());
         activeUpload = {
           fileFingerprint: getFileFingerprint(file),
@@ -83,10 +169,31 @@ export function UploadVideoForm() {
         setPendingUpload(activeUpload);
       }
 
+      if (!upload) {
+        throw new Error('Upload could not be prepared.');
+      }
+      if (!activeUpload) {
+        throw new Error('Upload state was lost.');
+      }
+      const uploadState = activeUpload;
+
+      if (uploadState.nextByte >= file.size) {
+        setState('confirming');
+        await confirmUpload(
+          uploadState.videoId,
+          uploadState.cloudinaryPublicId,
+          controller.signal,
+        );
+        clearPendingUpload(file);
+        setPendingUpload(null);
+        setState('complete');
+        return;
+      }
+
       setState('uploading');
-      await uploadVideoInChunks(file, upload, {
+      const uploadedAsset = await uploadVideoInChunks(file, upload, {
         onChunkComplete: (nextByte) => {
-          const nextUpload = { ...activeUpload, nextByte };
+          const nextUpload = { ...uploadState, nextByte };
           savePendingUpload(nextUpload);
           setPendingUpload(nextUpload);
         },
@@ -94,9 +201,21 @@ export function UploadVideoForm() {
         onRetry: (attempt) =>
           setTransferStatus(`Reconnecting (attempt ${attempt} of 3)`),
         signal: controller.signal,
-        startAt: activeUpload.nextByte,
-        uploadId: activeUpload.uploadId,
+        startAt: uploadState.nextByte,
+        uploadId: uploadState.uploadId,
       });
+      const completedUpload = {
+        ...uploadState,
+        cloudinaryPublicId: uploadedAsset.public_id,
+      };
+      savePendingUpload(completedUpload);
+      setPendingUpload(completedUpload);
+      setState('confirming');
+      await confirmUpload(
+        completedUpload.videoId,
+        completedUpload.cloudinaryPublicId,
+        controller.signal,
+      );
       clearPendingUpload(file);
       setPendingUpload(null);
       setTransferStatus('');
@@ -129,11 +248,36 @@ export function UploadVideoForm() {
     abortController.current?.abort();
   }
 
+  async function confirmUpload(
+    videoId: string,
+    publicId: string | undefined,
+    signal: AbortSignal,
+  ) {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await api.completeVideo(videoId, publicId);
+        return;
+      } catch (confirmError) {
+        if (
+          !(confirmError instanceof ApiError) ||
+          confirmError.status !== 409 ||
+          attempt >= 4
+        ) {
+          throw confirmError;
+        }
+
+        setTransferStatus('Finalizing upload. Retrying confirmation...');
+        await delay(2000, signal);
+      }
+    }
+  }
+
   if (status !== 'authenticated') {
     return <main className="min-h-screen bg-[#f6f8f7]" />;
   }
 
-  const busy = state === 'creating' || state === 'uploading';
+  const busy =
+    state === 'creating' || state === 'uploading' || state === 'confirming';
   const canResume = pendingUpload !== null;
 
   return (
@@ -163,9 +307,15 @@ export function UploadVideoForm() {
           <label className="block text-sm font-medium" htmlFor="video-file">
             Video file
             <input
-              accept="video/*"
+              accept={
+                constraints
+                  ? constraints.allowedFormats
+                      .map((format) => `.${format}`)
+                      .join(',')
+                  : 'video/*'
+              }
               className="mt-2 block w-full cursor-pointer border border-dashed border-[#9fb1a9] bg-[#f8faf9] px-3 py-7 text-sm text-[#465852] file:mr-4 file:border-0 file:bg-[#d9eee6] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-[#123b3a]"
-              disabled={busy}
+              disabled={busy || !constraints}
               id="video-file"
               onChange={selectFile}
               type="file"
@@ -198,7 +348,9 @@ export function UploadVideoForm() {
                 <span>
                   {state === 'complete'
                     ? 'Uploaded'
-                    : transferStatus || 'Uploading'}
+                    : state === 'confirming'
+                      ? 'Confirming upload'
+                      : transferStatus || 'Uploading'}
                 </span>
                 <span>{progress}%</span>
               </div>
@@ -236,7 +388,13 @@ export function UploadVideoForm() {
           <div className="mt-7 flex flex-wrap gap-3">
             <button
               className="h-11 bg-[#0f766e] px-5 text-sm font-semibold text-white transition hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
-              disabled={!file || !title.trim() || busy || state === 'complete'}
+              disabled={
+                !file ||
+                !title.trim() ||
+                !constraints ||
+                busy ||
+                state === 'complete'
+              }
               onClick={() => void startUpload()}
               type="button"
             >
@@ -244,9 +402,13 @@ export function UploadVideoForm() {
                 ? 'Preparing upload'
                 : state === 'uploading'
                   ? 'Uploading video'
-                  : canResume
-                    ? 'Resume upload'
-                    : 'Start upload'}
+                  : state === 'confirming'
+                    ? 'Confirming upload'
+                    : canResume && pendingUpload.nextByte >= (file?.size ?? 0)
+                      ? 'Confirm upload'
+                      : canResume
+                        ? 'Resume upload'
+                        : 'Start upload'}
             </button>
             {busy ? (
               <button
@@ -262,4 +424,18 @@ export function UploadVideoForm() {
       </section>
     </main>
   );
+}
+
+function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(resolve, milliseconds);
+    signal.addEventListener(
+      'abort',
+      () => {
+        window.clearTimeout(timer);
+        reject(new DOMException('Upload cancelled.', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
 }

@@ -1,5 +1,6 @@
 import {
   clearPendingUpload,
+  clearPendingUploadByVideoId,
   getFileFingerprint,
   loadPendingUpload,
   savePendingUpload,
@@ -51,5 +52,31 @@ describe('pending upload storage', () => {
     clearPendingUpload(file);
 
     expect(loadPendingUpload(file)).toBeNull();
+  });
+
+  it('removes a pending state when its video is deleted', () => {
+    savePendingUpload({
+      fileFingerprint: getFileFingerprint(file),
+      nextByte: 1,
+      title: 'Episode',
+      uploadId: 'upload-1',
+      videoId: 'video-1',
+    });
+    const otherFile = new File(['other'], 'other.mp4', {
+      lastModified: 1_727_512_000_001,
+      type: 'video/mp4',
+    });
+    savePendingUpload({
+      fileFingerprint: getFileFingerprint(otherFile),
+      nextByte: 1,
+      title: 'Other episode',
+      uploadId: 'upload-2',
+      videoId: 'video-2',
+    });
+
+    clearPendingUploadByVideoId('video-1');
+
+    expect(loadPendingUpload(file)).toBeNull();
+    expect(loadPendingUpload(otherFile)).toMatchObject({ videoId: 'video-2' });
   });
 });

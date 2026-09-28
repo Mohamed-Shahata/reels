@@ -1,6 +1,13 @@
-import { NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
-import type { StorageService } from '../../../src/storage/storage.service';
+import {
+  type StorageService,
+  UploadAssetNotReadyError,
+} from '../../../src/storage/storage.service';
 import { VideosService } from '../../../src/videos/videos.service';
 
 describe('VideosService.createUpload', () => {
@@ -15,9 +22,12 @@ describe('VideosService.createUpload', () => {
     };
     const storage = {
       createUploadSignature: jest.fn().mockReturnValue({
-        publicId: 'videos/user-1/video-1',
+        publicId: 'podcast-reels/uploads/user-1/video-1',
         signature: 'signature',
       }),
+      getVideoPublicId: jest
+        .fn()
+        .mockReturnValue('podcast-reels/uploads/user-1/video-1'),
     };
     const service = new VideosService(
       { video } as unknown as PrismaService,
@@ -36,10 +46,132 @@ describe('VideosService.createUpload', () => {
       },
     });
     expect(storage.createUploadSignature).toHaveBeenCalledWith({
-      publicId: 'videos/user-1/video-1',
+      publicId: 'podcast-reels/uploads/user-1/video-1',
     });
     expect(result.video.status).toBe('UPLOADING');
-    expect(result.upload.publicId).toBe('videos/user-1/video-1');
+    expect(result.upload.publicId).toBe('podcast-reels/uploads/user-1/video-1');
+  });
+});
+
+describe('VideosService.getUploadConstraints', () => {
+  it('returns the configured storage constraints without creating a video', () => {
+    const storage = {
+      getUploadConstraints: jest.fn().mockReturnValue({
+        allowedFormats: ['mp4'],
+        maxFileSizeBytes: 100,
+        maxDurationSec: 60,
+      }),
+    };
+    const service = new VideosService(
+      {} as PrismaService,
+      storage as unknown as StorageService,
+    );
+
+    expect(service.getUploadConstraints()).toEqual({
+      allowedFormats: ['mp4'],
+      maxFileSizeBytes: 100,
+      maxDurationSec: 60,
+    });
+    expect(storage.getUploadConstraints).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('VideosService.library', () => {
+  it('lists only the current user videos and serializes bigint sizes', async () => {
+    const video = {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'video-1',
+          title: 'Episode 42',
+          cloudinaryId: 'videos/user-1/video-1',
+          durationSec: 64.5,
+          sizeBytes: 123456n,
+          status: 'READY',
+          createdAt: new Date('2026-09-28T10:00:00.000Z'),
+        },
+      ]),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      {} as StorageService,
+    );
+
+    await expect(service.list('user-1')).resolves.toEqual([
+      expect.objectContaining({ sizeBytes: '123456', status: 'READY' }),
+    ]);
+    expect(video.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1' },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        title: true,
+        cloudinaryId: true,
+        durationSec: true,
+        sizeBytes: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+  });
+
+  it('renames only a video owned by the current user', async () => {
+    const video = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }),
+      update: jest.fn().mockResolvedValue({
+        id: 'video-1',
+        title: 'New title',
+        cloudinaryId: null,
+        durationSec: null,
+        sizeBytes: null,
+        status: 'UPLOADING',
+        createdAt: new Date('2026-09-28T10:00:00.000Z'),
+      }),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      {} as StorageService,
+    );
+
+    await expect(
+      service.rename('user-1', 'video-1', 'New title'),
+    ).resolves.toEqual(expect.objectContaining({ title: 'New title' }));
+    expect(video.findFirst).toHaveBeenCalledWith({
+      where: { id: 'video-1', userId: 'user-1' },
+      select: { id: true },
+    });
+  });
+
+  it('removes the Cloudinary asset before deleting an owned video', async () => {
+    const video = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'video-1',
+        cloudinaryId: 'videos/user-1/video-1',
+      }),
+      delete: jest.fn().mockResolvedValue(undefined),
+    };
+    const storage = { deleteVideo: jest.fn().mockResolvedValue(undefined) };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      storage as unknown as StorageService,
+    );
+
+    await expect(service.remove('user-1', 'video-1')).resolves.toBeUndefined();
+    expect(storage.deleteVideo).toHaveBeenCalledWith('videos/user-1/video-1');
+    expect(video.delete).toHaveBeenCalledWith({ where: { id: 'video-1' } });
+  });
+
+  it('does not delete an asset when the video is not owned by the user', async () => {
+    const video = { findFirst: jest.fn().mockResolvedValue(null) };
+    const storage = { deleteVideo: jest.fn() };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      storage as unknown as StorageService,
+    );
+
+    await expect(service.remove('user-2', 'video-1')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(storage.deleteVideo).not.toHaveBeenCalled();
   });
 });
 
@@ -47,11 +179,15 @@ describe('VideosService.resumeUpload', () => {
   it('only signs an upload that is still owned by the requesting user', async () => {
     const video = {
       findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }),
+      updateMany: jest.fn().mockResolvedValue({ count: 0 }),
     };
     const storage = {
       createUploadSignature: jest.fn().mockReturnValue({
-        publicId: 'videos/user-1/video-1',
+        publicId: 'podcast-reels/uploads/user-1/video-1',
       }),
+      getVideoPublicId: jest
+        .fn()
+        .mockReturnValue('podcast-reels/uploads/user-1/video-1'),
     };
     const service = new VideosService(
       { video } as unknown as PrismaService,
@@ -59,10 +195,14 @@ describe('VideosService.resumeUpload', () => {
     );
 
     await expect(service.resumeUpload('user-1', 'video-1')).resolves.toEqual({
-      publicId: 'videos/user-1/video-1',
+      publicId: 'podcast-reels/uploads/user-1/video-1',
     });
     expect(video.findFirst).toHaveBeenCalledWith({
-      where: { id: 'video-1', userId: 'user-1', status: 'UPLOADING' },
+      where: {
+        id: 'video-1',
+        userId: 'user-1',
+        status: { in: ['UPLOADING', 'FAILED'] },
+      },
       select: { id: true },
     });
   });
@@ -77,5 +217,106 @@ describe('VideosService.resumeUpload', () => {
     await expect(
       service.resumeUpload('user-2', 'video-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
+describe('VideosService.completeUpload', () => {
+  it('marks a verified upload as ready and serializes its size safely', async () => {
+    const video = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }),
+      update: jest.fn().mockResolvedValue({
+        id: 'video-1',
+        title: 'Episode 42',
+        cloudinaryId: 'podcast-reels/uploads/user-1/video-1',
+        durationSec: 64.5,
+        sizeBytes: 123456n,
+        status: 'READY',
+      }),
+    };
+    const storage = {
+      getVideoMetadata: jest.fn().mockResolvedValue({
+        publicId: 'podcast-reels/uploads/user-1/video-1',
+        durationSec: 64.5,
+        bytes: 123456n,
+      }),
+      getVideoPublicId: jest
+        .fn()
+        .mockReturnValue('podcast-reels/uploads/user-1/video-1'),
+      getLegacyVideoPublicIds: jest.fn().mockReturnValue([]),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      storage as unknown as StorageService,
+    );
+
+    await expect(service.completeUpload('user-1', 'video-1')).resolves.toEqual(
+      expect.objectContaining({
+        cloudinaryId: 'podcast-reels/uploads/user-1/video-1',
+        durationSec: 64.5,
+        sizeBytes: '123456',
+        status: 'READY',
+      }),
+    );
+    expect(video.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          cloudinaryId: 'podcast-reels/uploads/user-1/video-1',
+          durationSec: 64.5,
+          sizeBytes: 123456n,
+          status: 'READY',
+        },
+      }),
+    );
+  });
+
+  it('marks the pending video as failed when Cloudinary cannot verify it', async () => {
+    const video = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const storage = {
+      getVideoMetadata: jest.fn().mockRejectedValue(new Error('not found')),
+      getVideoPublicId: jest
+        .fn()
+        .mockReturnValue('podcast-reels/uploads/user-1/video-1'),
+      getLegacyVideoPublicIds: jest.fn().mockReturnValue([]),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      storage as unknown as StorageService,
+    );
+
+    await expect(
+      service.completeUpload('user-1', 'video-1'),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(video.update).toHaveBeenCalledWith({
+      where: { id: 'video-1' },
+      data: { status: 'FAILED' },
+    });
+  });
+
+  it('keeps the upload pending while Cloudinary is still indexing the asset', async () => {
+    const video = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }),
+      update: jest.fn(),
+    };
+    const storage = {
+      getVideoMetadata: jest
+        .fn()
+        .mockRejectedValue(new UploadAssetNotReadyError()),
+      getVideoPublicId: jest
+        .fn()
+        .mockReturnValue('podcast-reels/uploads/user-1/video-1'),
+      getLegacyVideoPublicIds: jest.fn().mockReturnValue([]),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      storage as unknown as StorageService,
+    );
+
+    await expect(
+      service.completeUpload('user-1', 'video-1'),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(video.update).not.toHaveBeenCalled();
   });
 });

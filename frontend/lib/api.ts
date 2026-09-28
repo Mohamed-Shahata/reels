@@ -14,9 +14,17 @@ const uploadSignatureSchema = z.object({
   timestamp: z.number(),
   signature: z.string(),
   publicId: z.string(),
-  folder: z.string(),
   resourceType: z.literal('video'),
+  allowedFormats: z.array(z.string().min(1)).min(1),
+  maxFileSizeBytes: z.number().int().positive(),
+  maxDurationSec: z.number().positive(),
   uploadPreset: z.string().optional(),
+});
+
+const uploadConstraintsSchema = uploadSignatureSchema.pick({
+  allowedFormats: true,
+  maxFileSizeBytes: true,
+  maxDurationSec: true,
 });
 
 const createVideoSchema = z.object({
@@ -29,12 +37,37 @@ const createVideoSchema = z.object({
   upload: uploadSignatureSchema,
 });
 
+const completedVideoSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  cloudinaryId: z.string(),
+  durationSec: z.number().positive(),
+  sizeBytes: z.string(),
+  status: z.literal('READY'),
+});
+
+const videoStatusSchema = z.enum(['UPLOADING', 'READY', 'FAILED']);
+
+const libraryVideoSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  cloudinaryId: z.string().nullable(),
+  durationSec: z.number().positive().nullable(),
+  sizeBytes: z.string().nullable(),
+  status: videoStatusSchema,
+  createdAt: z.string(),
+});
+
+const libraryVideosSchema = z.array(libraryVideoSchema);
+
 const errorSchema = z.object({
   message: z.union([z.string(), z.array(z.string())]).optional(),
 });
 
 export type User = z.infer<typeof userSchema>;
 export type CreateVideoUpload = z.infer<typeof createVideoSchema>;
+export type UploadConstraints = z.infer<typeof uploadConstraintsSchema>;
+export type LibraryVideo = z.infer<typeof libraryVideoSchema>;
 
 export class ApiError extends Error {
   constructor(
@@ -95,6 +128,9 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   logout: () => request('/auth/logout', z.undefined(), { method: 'POST' }),
+  getVideoUploadConstraints: () =>
+    request('/videos/upload-constraints', uploadConstraintsSchema),
+  getVideos: () => request('/videos', libraryVideosSchema),
   createVideo: (title: string) =>
     request('/videos', createVideoSchema, {
       method: 'POST',
@@ -104,4 +140,16 @@ export const api = {
     request(`/videos/${videoId}/upload-signature`, uploadSignatureSchema, {
       method: 'POST',
     }),
+  completeVideo: (videoId: string, publicId?: string) =>
+    request(`/videos/${videoId}/complete`, completedVideoSchema, {
+      method: 'POST',
+      body: JSON.stringify(publicId ? { publicId } : {}),
+    }),
+  renameVideo: (videoId: string, title: string) =>
+    request(`/videos/${videoId}`, libraryVideoSchema, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
+  deleteVideo: (videoId: string) =>
+    request(`/videos/${videoId}`, z.undefined(), { method: 'DELETE' }),
 };

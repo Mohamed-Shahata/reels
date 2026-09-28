@@ -9,7 +9,22 @@ export interface UploadSignature {
   timestamp: number;
   signature: string;
   publicId: string;
-  folder: string;
   resourceType: 'video';
+  allowedFormats: string[];
+  maxFileSizeBytes: number;
+  maxDurationSec: number;
   uploadPreset?: string;
+}
+
+export interface UploadConstraints {
+  allowedFormats: string[];
+  maxFileSizeBytes: number;
+  maxDurationSec: number;
+}
+
+export interface VideoMetadata {
+  bytes: bigint;
+  durationSec: number;
+  format: string;
+  publicId: string;
 }

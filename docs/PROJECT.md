@@ -348,7 +348,7 @@ Acceptance: the API can generate an upload signature.
 
 ### Phase 1: Authentication
 
-Status: 1.1 to 1.6 and 2.1 to 2.3 done.
+Status: 1.1 to 1.6 and 2.1 to 2.7 done.
 
 **1.1 Registration**
 Endpoint with email validation, password rules and argon2 hashing. Reject duplicate emails.
@@ -660,6 +660,11 @@ Backend (`backend/.env`):
 | `CLOUDINARY_API_SECRET` | yes | Cloudinary API secret (server only) |
 | `CLOUDINARY_UPLOAD_PRESET` | no | Optional upload preset name; when set it is included in the signature |
 | `CLOUDINARY_UPLOAD_FOLDER` | no | Folder for uploaded videos (default `podcast-reels`) |
+| `VIDEO_ALLOWED_FORMATS` | no | Comma-separated extensions allowed for video uploads (default `mp4,mov,webm`) |
+| `VIDEO_MAX_SIZE_BYTES` | no | Largest accepted video file in bytes (default `5368709120`, 5 GiB) |
+| `VIDEO_MAX_DURATION_SEC` | no | Longest accepted video duration in seconds (default `14400`, 4 hours) |
+| `STALE_UPLOAD_THRESHOLD_SEC` | no | Age after which an incomplete upload is abandoned (default `86400`, 24 hours) |
+| `STALE_UPLOAD_CLEANUP_INTERVAL_SEC` | no | Frequency for the stale-upload cleanup job (default `3600`, 1 hour) |
 
 Frontend (`frontend/.env.local`):
 

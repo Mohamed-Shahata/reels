@@ -106,7 +106,6 @@ function uploadChunk(input: UploadChunkInput): Promise<CloudinaryUploadResult> {
     formData.append('timestamp', String(input.upload.timestamp));
     formData.append('signature', input.upload.signature);
     formData.append('public_id', input.upload.publicId);
-    formData.append('folder', input.upload.folder);
     if (input.upload.uploadPreset) {
       formData.append('upload_preset', input.upload.uploadPreset);
     }
@@ -122,10 +121,13 @@ function uploadChunk(input: UploadChunkInput): Promise<CloudinaryUploadResult> {
         resolve(JSON.parse(request.responseText) as CloudinaryUploadResult);
         return;
       }
+      const message = cloudinaryErrorMessage(request.responseText);
       reject(
         new ChunkUploadError(
-          'Cloudinary could not accept this video chunk.',
-          request.status >= 500,
+          message
+            ? `Cloudinary rejected this video chunk: ${message}`
+            : `Cloudinary rejected this video chunk (HTTP ${request.status}).`,
+          request.status >= 500 || request.status === 429,
         ),
       );
     });
@@ -148,6 +150,15 @@ function uploadChunk(input: UploadChunkInput): Promise<CloudinaryUploadResult> {
     request.setRequestHeader('X-Unique-Upload-Id', input.uploadId);
     request.send(formData);
   });
+}
+
+function cloudinaryErrorMessage(responseText: string): string | null {
+  try {
+    const body = JSON.parse(responseText) as { error?: { message?: unknown } };
+    return typeof body.error?.message === 'string' ? body.error.message : null;
+  } catch {
+    return null;
+  }
 }
 
 function wait(delay: number, signal?: AbortSignal): Promise<void> {
