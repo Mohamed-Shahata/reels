@@ -16,7 +16,7 @@
     "lint": "npm --prefix backend run lint:check && npm --prefix frontend run lint",
     "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
     "format:check": "npm --prefix backend run format:check && npm --prefix frontend run format:check",
-    "test": "npm --prefix backend test && npm --prefix backend run test:e2e",
+    "test": "npm --prefix backend test && npm --prefix backend run test:e2e && npm --prefix frontend test",
     "check": "npm run lint && npm run typecheck && npm run format:check"
   },
   "devDependencies": {
