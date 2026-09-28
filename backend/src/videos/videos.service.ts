@@ -11,6 +11,7 @@ import {
   StorageService,
   UploadAssetNotReadyError,
 } from '../storage/storage.service';
+import { ProcessingJobsService } from '../processing/processing-jobs.service';
 
 const createdVideoSelect = {
   id: true,
@@ -71,6 +72,7 @@ export class VideosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: StorageService,
+    private readonly jobsService: ProcessingJobsService,
   ) {}
 
   async createUpload(
@@ -104,6 +106,92 @@ export class VideosService {
     });
 
     return videos.map((video) => this.serializeLibraryVideo(video));
+  }
+
+  async getPlaybackUrl(userId: string, videoId: string): Promise<string> {
+    const video = await this.prisma.video.findFirst({
+      where: { id: videoId, userId, status: 'READY' },
+      select: { cloudinaryId: true },
+    });
+
+    if (!video?.cloudinaryId) {
+      throw new NotFoundException('Video was not found');
+    }
+
+    return this.storage.getVideoPlaybackUrl(video.cloudinaryId);
+  }
+
+  async getProcessingJobs(userId: string, videoId: string) {
+    const video = await this.prisma.video.findFirst({
+      where: { id: videoId, userId },
+      select: { id: true },
+    });
+
+    if (!video) {
+      throw new NotFoundException('Video was not found');
+    }
+
+    return this.prisma.processingJob.findMany({
+      where: { videoId },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        progress: true,
+        lastError: true,
+        createdAt: true,
+        startedAt: true,
+        completedAt: true,
+        failedAt: true,
+      },
+    });
+  }
+
+  async startTranscription(userId: string, videoId: string) {
+    const video = await this.prisma.video.findFirst({
+      where: { id: videoId, userId, status: 'READY' },
+      select: { id: true },
+    });
+
+    if (!video) {
+      throw new NotFoundException('Video was not found or is not ready');
+    }
+
+    return this.jobsService.createJob({
+      userId,
+      videoId,
+      type: 'TRANSCRIPTION',
+      payload: { language: 'ar' },
+    });
+  }
+
+  async getTranscript(userId: string, videoId: string) {
+    const video = await this.prisma.video.findFirst({
+      where: { id: videoId, userId },
+      select: { id: true },
+    });
+
+    if (!video) {
+      throw new NotFoundException('Video was not found');
+    }
+
+    const transcript = await this.prisma.transcript.findUnique({
+      where: { videoId },
+      include: {
+        segments: {
+          orderBy: { startSec: 'asc' },
+          select: {
+            id: true,
+            startSec: true,
+            endSec: true,
+            text: true,
+          },
+        },
+      },
+    });
+
+    return transcript;
   }
 
   async rename(
@@ -205,6 +293,17 @@ export class VideosService {
         select: readyVideoSelect,
       });
 
+      await this.recordUsage(userId, metadata.durationSec, 0);
+
+      // Automatically queue transcription
+      try {
+        await this.startTranscription(userId, video.id);
+      } catch (err) {
+        this.logger.error(
+          `Failed to auto-start transcription for ${video.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
       return {
         ...completed,
         cloudinaryId: completed.cloudinaryId!,
@@ -246,5 +345,26 @@ export class VideosService {
       ...video,
       sizeBytes: video.sizeBytes?.toString() ?? null,
     };
+  }
+
+  private async recordUsage(
+    userId: string,
+    uploadedSeconds: number,
+    clipCount: number,
+  ): Promise<void> {
+    const monthStart = this.monthStart();
+    await this.prisma.usageRecord.upsert({
+      where: { userId_monthStart: { userId, monthStart } },
+      create: { userId, monthStart, uploadedSeconds, clipCount },
+      update: {
+        uploadedSeconds: { increment: uploadedSeconds },
+        clipCount: { increment: clipCount },
+      },
+    });
+  }
+
+  private monthStart(): Date {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   }
 }

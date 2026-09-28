@@ -8,7 +8,12 @@ import {
   type StorageService,
   UploadAssetNotReadyError,
 } from '../../../src/storage/storage.service';
+import type { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
 import { VideosService } from '../../../src/videos/videos.service';
+
+const noopJobsService: ProcessingJobsService = {
+  createJob: jest.fn().mockResolvedValue({ id: 'job-1', status: 'PENDING' }),
+} as unknown as ProcessingJobsService;
 
 describe('VideosService.createUpload', () => {
   it('creates an uploading video and scopes the signed public id to its owner', async () => {
@@ -32,6 +37,7 @@ describe('VideosService.createUpload', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     const result = await service.createUpload('user-1', 'Episode 42');
@@ -65,6 +71,7 @@ describe('VideosService.getUploadConstraints', () => {
     const service = new VideosService(
       {} as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     expect(service.getUploadConstraints()).toEqual({
@@ -94,6 +101,7 @@ describe('VideosService.library', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       {} as StorageService,
+      noopJobsService,
     );
 
     await expect(service.list('user-1')).resolves.toEqual([
@@ -130,6 +138,7 @@ describe('VideosService.library', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       {} as StorageService,
+      noopJobsService,
     );
 
     await expect(
@@ -153,6 +162,7 @@ describe('VideosService.library', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     await expect(service.remove('user-1', 'video-1')).resolves.toBeUndefined();
@@ -166,6 +176,7 @@ describe('VideosService.library', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     await expect(service.remove('user-2', 'video-1')).rejects.toBeInstanceOf(
@@ -192,6 +203,7 @@ describe('VideosService.resumeUpload', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     await expect(service.resumeUpload('user-1', 'video-1')).resolves.toEqual({
@@ -212,6 +224,7 @@ describe('VideosService.resumeUpload', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       { createUploadSignature: jest.fn() } as unknown as StorageService,
+      noopJobsService,
     );
 
     await expect(
@@ -244,9 +257,11 @@ describe('VideosService.completeUpload', () => {
         .mockReturnValue('podcast-reels/uploads/user-1/video-1'),
       getLegacyVideoPublicIds: jest.fn().mockReturnValue([]),
     };
+    const usageRecord = { upsert: jest.fn().mockResolvedValue(undefined) };
     const service = new VideosService(
-      { video } as unknown as PrismaService,
+      { video, usageRecord } as unknown as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     await expect(service.completeUpload('user-1', 'video-1')).resolves.toEqual(
@@ -284,6 +299,7 @@ describe('VideosService.completeUpload', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     await expect(
@@ -312,11 +328,75 @@ describe('VideosService.completeUpload', () => {
     const service = new VideosService(
       { video } as unknown as PrismaService,
       storage as unknown as StorageService,
+      noopJobsService,
     );
 
     await expect(
       service.completeUpload('user-1', 'video-1'),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(video.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('VideosService.getTranscript', () => {
+  it('returns the transcript for an owned video', async () => {
+    const video = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }),
+    };
+    const transcript = {
+      findUnique: jest.fn().mockResolvedValue({
+        id: 'transcript-1',
+        videoId: 'video-1',
+        language: 'ar',
+        segments: [{ id: 'seg-1', startSec: 0, endSec: 5, text: 'مرحبا بكم' }],
+      }),
+    };
+    const service = new VideosService(
+      { video, transcript } as unknown as PrismaService,
+      {} as StorageService,
+      noopJobsService,
+    );
+
+    const result = await service.getTranscript('user-1', 'video-1');
+
+    expect(result).toEqual({
+      id: 'transcript-1',
+      videoId: 'video-1',
+      language: 'ar',
+      segments: [{ id: 'seg-1', startSec: 0, endSec: 5, text: 'مرحبا بكم' }],
+    });
+    expect(video.findFirst).toHaveBeenCalledWith({
+      where: { id: 'video-1', userId: 'user-1' },
+      select: { id: true },
+    });
+    expect(transcript.findUnique).toHaveBeenCalledWith({
+      where: { videoId: 'video-1' },
+      include: {
+        segments: {
+          orderBy: { startSec: 'asc' },
+          select: {
+            id: true,
+            startSec: true,
+            endSec: true,
+            text: true,
+          },
+        },
+      },
+    });
+  });
+
+  it('throws NotFoundException if video is not found or not owned', async () => {
+    const video = {
+      findFirst: jest.fn().mockResolvedValue(null),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      {} as StorageService,
+      noopJobsService,
+    );
+
+    await expect(
+      service.getTranscript('user-1', 'video-999'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

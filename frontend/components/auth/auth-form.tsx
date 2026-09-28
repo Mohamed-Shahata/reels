@@ -1,6 +1,6 @@
 'use client';
 
-import { ApiError } from '@/lib/api';
+import { getApiErrorMessage } from '@/lib/api';
 import { useAuth } from './auth-provider';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -61,9 +61,10 @@ export function AuthForm({ mode }: { mode: Mode }) {
       router.replace('/');
     } catch (requestError) {
       setError(
-        requestError instanceof ApiError
-          ? requestError.message
-          : 'We could not reach the service. Please try again.',
+        getApiErrorMessage(
+          requestError,
+          'We could not reach the service. Please try again.',
+        ),
       );
     } finally {
       setPending(false);

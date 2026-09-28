@@ -16,11 +16,13 @@ export interface SessionTokens {
 @Injectable()
 export class AuthCookiesService {
   private readonly secure: boolean;
+  private readonly sameSite: CookieOptions['sameSite'];
   private readonly accessTtlSec: number;
   private readonly refreshTtlSec: number;
 
   constructor(config: ConfigService<Env, true>) {
     this.secure = config.get('NODE_ENV', { infer: true }) === 'production';
+    this.sameSite = config.get('COOKIE_SAME_SITE', { infer: true });
     this.accessTtlSec = config.get('ACCESS_TOKEN_TTL_SEC', { infer: true });
     this.refreshTtlSec = config.get('REFRESH_TOKEN_TTL_SEC', { infer: true });
   }
@@ -61,7 +63,7 @@ export class AuthCookiesService {
     return {
       httpOnly: true,
       secure: this.secure,
-      sameSite: 'lax',
+      sameSite: this.sameSite,
       path,
     };
   }

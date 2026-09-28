@@ -1,6 +1,6 @@
 'use client';
 
-import { ApiError, api } from '@/lib/api';
+import { ApiError, api, getApiErrorMessage } from '@/lib/api';
 import { uploadVideoInChunks } from '@/lib/chunked-upload';
 import {
   clearPendingUpload,
@@ -15,9 +15,10 @@ import {
   validateVideoFile,
 } from '@/lib/video-validation';
 import { useAuth } from '@/components/auth/auth-provider';
+import { PageLoading } from '@/components/common/page-loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ChangeEvent, useEffect, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useRef, useState } from 'react';
 import type { UploadConstraints } from '@/lib/api';
 
 type UploadState =
@@ -48,14 +49,26 @@ export function UploadVideoForm() {
     if (status === 'unauthenticated') router.replace('/login');
   }, [router, status]);
 
+  const loadConstraints = useCallback(async () => {
+    setError(null);
+    try {
+      setConstraints(await api.getVideoUploadConstraints());
+    } catch (requestError) {
+      setError(
+        getApiErrorMessage(
+          requestError,
+          'Upload settings could not be loaded.',
+        ),
+      );
+    }
+  }, []);
+
   useEffect(() => {
     if (status !== 'authenticated') return;
+    const timer = window.setTimeout(() => void loadConstraints(), 0);
 
-    api
-      .getVideoUploadConstraints()
-      .then(setConstraints)
-      .catch(() => setError('Upload settings could not be loaded.'));
-  }, [status]);
+    return () => window.clearTimeout(timer);
+  }, [loadConstraints, status]);
 
   async function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0] ?? null;
@@ -233,11 +246,7 @@ export function UploadVideoForm() {
       }
       setState('failed');
       setError(
-        uploadError instanceof ApiError
-          ? uploadError.message
-          : uploadError instanceof Error
-            ? uploadError.message
-            : 'The upload could not be started.',
+        getApiErrorMessage(uploadError, 'The upload could not be started.'),
       );
     } finally {
       abortController.current = null;
@@ -272,8 +281,12 @@ export function UploadVideoForm() {
     }
   }
 
+  if (status === 'loading') {
+    return <PageLoading label="Loading upload page..." />;
+  }
+
   if (status !== 'authenticated') {
-    return <main className="min-h-screen bg-[#f6f8f7]" />;
+    return null;
   }
 
   const busy =
@@ -373,7 +386,7 @@ export function UploadVideoForm() {
           ) : null}
           {state === 'complete' ? (
             <p className="mt-6 border-l-2 border-[#0f766e] bg-[#eff9f4] px-3 py-2 text-sm text-[#185c4e]">
-              Upload received. It will be confirmed in the next processing step.
+              Video is ready. Open it from your workspace to create clips.
             </p>
           ) : null}
           {state === 'idle' && canResume ? (
@@ -383,6 +396,16 @@ export function UploadVideoForm() {
           ) : null}
           {state === 'idle' && transferStatus ? (
             <p className="mt-6 text-sm text-[#5f6e69]">{transferStatus}</p>
+          ) : null}
+
+          {!constraints && !busy ? (
+            <button
+              className="mt-6 h-10 border border-[#a9bab3] px-4 text-sm font-medium text-[#263532] hover:border-[#0f766e] hover:text-[#0f766e]"
+              onClick={() => void loadConstraints()}
+              type="button"
+            >
+              Retry upload settings
+            </button>
           ) : null}
 
           <div className="mt-7 flex flex-wrap gap-3">

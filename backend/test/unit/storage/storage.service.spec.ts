@@ -127,6 +127,35 @@ describe('StorageService', () => {
     resource.mockRestore();
   });
 
+  it('builds trimmed playback and streaming download URLs', () => {
+    const url = jest
+      .spyOn(cloudinary, 'url')
+      .mockReturnValueOnce('https://preview.example')
+      .mockReturnValueOnce('https://download.example');
+    const service = createService();
+
+    expect(service.getClipPlaybackUrl('video-1', 10, 30)).toBe(
+      'https://preview.example',
+    );
+    expect(service.getClipDownloadUrl('video-1', 10, 30, 'clip-1')).toBe(
+      'https://download.example',
+    );
+    expect(url).toHaveBeenNthCalledWith(1, 'video-1', {
+      resource_type: 'video',
+      secure: true,
+      format: 'mp4',
+      transformation: [{ start_offset: 10, end_offset: 30 }],
+    });
+    expect(url).toHaveBeenNthCalledWith(2, 'video-1', {
+      resource_type: 'video',
+      secure: true,
+      format: 'mp4',
+      flags: 'streaming_attachment:clip-1',
+      transformation: [{ start_offset: 10, end_offset: 30 }],
+    });
+    url.mockRestore();
+  });
+
   it('never exposes the api secret', () => {
     const result = createService().createUploadSignature({
       publicId: 'video-3',

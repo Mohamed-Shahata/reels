@@ -39,9 +39,15 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     if (statusCode >= 500) {
       this.logger.error(
-        `${request.method} ${request.originalUrl} failed: ${
-          exception instanceof Error ? exception.message : 'unknown error'
-        }`,
+        JSON.stringify({
+          event: 'http_error',
+          method: request.method,
+          path: request.originalUrl,
+          statusCode,
+          requestId: typeof requestId === 'string' ? requestId : undefined,
+          error:
+            exception instanceof Error ? exception.message : 'unknown error',
+        }),
         exception instanceof Error ? exception.stack : undefined,
       );
     }

@@ -212,6 +212,8 @@ Registration rules: `email` is trimmed, lowercased and must be a valid address (
 | PATCH | `/clips/:id` | Update title, start or end |
 | DELETE | `/clips/:id` | Delete a clip |
 | GET | `/clips/:id/download` | Get a download URL |
+| GET | `/clips/:id/playback` | Get a trimmed playback URL |
+| GET | `/usage?month=YYYY-MM` | Get the current user's monthly upload minutes and clip count |
 
 ### Clip validation rules
 
@@ -348,7 +350,7 @@ Acceptance: the API can generate an upload signature.
 
 ### Phase 1: Authentication
 
-Status: 1.1 to 1.6 and 2.1 to 2.7 done.
+Status: 1.1 to 1.6, 2.1 to 2.7, and 3.2 to 3.7 done. Task 3.1 is validated with a 28-minute real upload and needs a one-hour confirmation upload to meet its final acceptance criterion.
 
 **1.1 Registration**
 Endpoint with email validation, password rules and argon2 hashing. Reject duplicate emails.
@@ -410,6 +412,20 @@ Acceptance: uploads older than the configured threshold are cleaned automaticall
 Verify that clips can be produced by offset-based URL transformation, previewed in a player, and downloaded as a file, using a real one-hour video on the chosen plan.
 Acceptance: written result documenting what works, limits found, and the fallback decision.
 
+#### 3.1 Spike result (2026-09-28)
+
+Tested against a real uploaded MP4 (`1280x720`, `96.2 MB`, `1680.145` seconds) in the configured Cloudinary product environment.
+
+| Check | Result |
+|-------|--------|
+| Playback URL for seconds `60` to `75` | Passed: returned `206` with `video/mp4`; generated clip size was `1,071,696` bytes |
+| Attachment download URL for the same range | Passed: returned `206` with `Content-Disposition: attachment; filename="podcast-reel-60-75.mp4"` after the derived asset was generated |
+| Streaming attachment URL | Passed: returned `200` with attachment disposition immediately |
+
+The first request to a normal `fl_attachment` URL returned Cloudinary `423` while the derived clip was generated. The client must either retry that response or use `fl_streaming_attachment` for download actions. Preview URLs can be generated with `so` and `eo` offsets. Download URLs should use the same offsets plus `fl_streaming_attachment` and a sanitized filename.
+
+**Decision:** use Cloudinary dynamic URL transformations for Phase 3 playback and downloads. No FFmpeg worker is needed for the MVP. The tested source is 28 minutes long rather than the planned one-hour acceptance asset, so repeat this exact check with a one-hour production-like upload before closing the Phase 3.1 acceptance criterion.
+
 **3.2 Clip CRUD**
 Create, list, update and delete clips with the validation rules from section 5.
 Acceptance: invalid ranges are rejected with clear error messages.
@@ -440,31 +456,59 @@ Acceptance: a user can never read or modify another user's clips.
 Audit every route for ownership checks.
 Acceptance: automated tests prove cross-user access is blocked.
 
+#### 4.1 Review result (2026-09-28)
+
+All resource routes require the authenticated user context. Video read, rename, delete, resume, completion and playback queries include the requesting `userId`. Clip create and list operations first resolve the owned video; clip update, delete, playback and download queries filter through `clip.video.userId`. Authentication session routes are scoped by the signed session identity. E2E tests cover cross-user rejection for video mutation, upload resume, clip list/update/delete and playback/download URLs.
+
 **4.2 Usage tracking**
 Record uploaded minutes and clip counts per user.
 Acceptance: usage can be queried per user and per month.
+
+#### 4.2 Implementation result (2026-09-28)
+
+`UsageRecord` stores one counter record per user and UTC calendar month. A verified video adds its full duration in seconds exactly when it becomes `READY`; each newly created clip increments the clip counter. `GET /usage?month=YYYY-MM` returns only the authenticated user's counters, with uploaded duration exposed as fractional minutes. Missing records return zero usage. The `UsageRecord` migration has been applied to the development database.
 
 **4.3 Error handling and empty states**
 Consistent loading, empty and error states across the UI.
 Acceptance: no unhandled error is shown as a blank screen.
 
+#### 4.3 Implementation result (2026-09-28)
+
+Authentication, workspace, upload and video-editor views now render an accessible loading state while their session or data is resolving. Their request failures are shown inline, empty libraries and clip lists are explicit, and upload-settings failures include a retry action. No route intentionally falls through to a blank screen during those states.
+
 **4.4 Observability**
 Structured logging and error reporting for the API and frontend.
 Acceptance: a failed request can be traced from the UI to the API log.
+
+#### 4.4 Implementation result (2026-09-28)
+
+The API assigns or preserves `x-request-id` for every response and emits structured JSON request logs containing the method, path, status, duration and request ID. Server failures emit a structured error log with the same ID while keeping internal exception details out of the HTTP response. The frontend retains the ID from the error body or response header and displays it as `Reference ID` beside the user-safe error, so a reported UI failure can be located in the API log.
 
 **4.5 Deployment**
 Deploy the API, database and frontend to a staging environment.
 Acceptance: colleagues can register and complete the full flow on staging.
 
+#### 4.5 Staging readiness (2026-09-28)
+
+The API now has a production Docker image plus a separate migration target, and the staging environment variables and verification runbook are documented in `docs/STAGING.md`. Both production builds pass locally. Deployment is intentionally skipped for now: the developer laptop is the active runtime environment, so there is no staging provider or colleague acceptance environment yet.
+
 **4.6 MVP acceptance test**
 End-to-end run: register, upload a one-hour podcast, create five clips, download them.
 Acceptance: the run completes with no manual fixes. **Do not start Phase 5 before this passes.**
+
+#### 4.6 Local automated coverage (2026-09-28)
+
+The backend acceptance test now runs the whole authenticated flow with a verified 3,600-second asset: registration, video creation, upload confirmation, five clip creations, five download URL requests and monthly usage assertions. It uses the local test storage adapter, so it does not replace the remaining manual browser and Cloudinary check with a real one-hour file. Run that local check before marking 4.6 accepted or beginning Phase 5.
 
 ### Phase 5: Transcription
 
 **5.1 Queue infrastructure**
 Add Redis and BullMQ, a `ProcessingJob` table, and a job status model: `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`.
 Acceptance: jobs survive an API restart.
+
+#### 5.1 Implementation result (2026-09-28)
+
+Docker Compose now runs Redis with AOF persistence alongside PostgreSQL. The API validates `REDIS_URL`, stores every background task in `ProcessingJob`, and enqueues work through BullMQ using the database job id as the Bull job id. On startup the API resets interrupted `RUNNING` rows back to `PENDING` and ensures each persisted job is present in Redis again. Automated tests cover job creation, recovery and the in-memory queue adapter used while `NODE_ENV=test`.
 
 **5.2 Audio extraction**
 Produce a compressed mono audio track from the video.
@@ -624,7 +668,7 @@ Acceptance: production checklist completed.
 
 1. Install Node.js 22 (see `.nvmrc`) and Docker.
 2. Install dependencies: `npm run install:all`.
-3. Start PostgreSQL: `npm run db:up`.
+3. Start PostgreSQL and Redis: `npm run db:up`.
 4. Backend: copy `backend/.env.example` to `backend/.env` and fill in the Cloudinary values, then run `npm --prefix backend run db:migrate` and `npm run dev:backend`.
 5. Frontend: copy `frontend/.env.example` to `frontend/.env.local`, then run `npm run dev:frontend`.
 6. Verify: `GET http://localhost:4000/api/v1/health` returns `{ "status": "ok", "database": "up", ... }`.
@@ -649,6 +693,7 @@ Backend (`backend/.env`):
 | `NODE_ENV` | no | `development`, `test` or `production` (default `development`) |
 | `PORT` | no | API port (default `4000`) |
 | `DATABASE_URL` | yes | PostgreSQL connection string |
+| `REDIS_URL` | yes | Redis connection string for BullMQ |
 | `CORS_ORIGIN` | yes | Comma-separated list of allowed frontend origins |
 | `JWT_ACCESS_SECRET` | yes | Secret for signing access tokens (at least 32 characters) |
 | `ACCESS_TOKEN_TTL_SEC` | no | Access token lifetime in seconds (default `900`) |
@@ -663,6 +708,8 @@ Backend (`backend/.env`):
 | `VIDEO_ALLOWED_FORMATS` | no | Comma-separated extensions allowed for video uploads (default `mp4,mov,webm`) |
 | `VIDEO_MAX_SIZE_BYTES` | no | Largest accepted video file in bytes (default `5368709120`, 5 GiB) |
 | `VIDEO_MAX_DURATION_SEC` | no | Longest accepted video duration in seconds (default `14400`, 4 hours) |
+| `CLIP_MIN_DURATION_SEC` | no | Shortest allowed clip duration in seconds (default `5`) |
+| `CLIP_MAX_DURATION_SEC` | no | Longest allowed clip duration in seconds (default `180`) |
 | `STALE_UPLOAD_THRESHOLD_SEC` | no | Age after which an incomplete upload is abandoned (default `86400`, 24 hours) |
 | `STALE_UPLOAD_CLEANUP_INTERVAL_SEC` | no | Frequency for the stale-upload cleanup job (default `3600`, 1 hour) |
 

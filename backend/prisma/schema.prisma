@@ -14,6 +14,17 @@ enum VideoStatus {
   FAILED
 }
 
+enum ProcessingJobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ProcessingJobType {
+  TRANSCRIPTION
+}
+
 model User {
   id           String    @id @default(cuid())
   email        String    @unique
@@ -22,6 +33,8 @@ model User {
   updatedAt    DateTime  @updatedAt
   videos       Video[]
   sessions     Session[]
+  usageRecords UsageRecord[]
+  processingJobs ProcessingJob[]
 }
 
 model Session {
@@ -47,6 +60,8 @@ model Video {
   updatedAt    DateTime    @updatedAt
   user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   clips        Clip[]
+  processingJobs ProcessingJob[]
+  transcript   Transcript?
 
   @@index([userId])
 }
@@ -62,4 +77,64 @@ model Clip {
   video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@index([videoId])
+}
+
+model UsageRecord {
+  id              String   @id @default(cuid())
+  userId          String
+  monthStart      DateTime
+  uploadedSeconds Float    @default(0)
+  clipCount       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, monthStart])
+  @@index([userId, monthStart])
+}
+
+model ProcessingJob {
+  id          String              @id @default(cuid())
+  userId      String
+  videoId     String?
+  type        ProcessingJobType
+  status      ProcessingJobStatus @default(PENDING)
+  bullJobId   String?             @unique
+  progress    Int                 @default(0)
+  attempts    Int                 @default(0)
+  lastError   String?
+  payload     Json?
+  startedAt   DateTime?
+  completedAt DateTime?
+  failedAt    DateTime?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video       Video?              @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
+  @@index([videoId])
+  @@index([status, createdAt])
+}
+
+model Transcript {
+  id          String              @id @default(cuid())
+  videoId     String              @unique
+  language    String
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  video       Video               @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  segments    TranscriptSegment[]
+}
+
+model TranscriptSegment {
+  id           String     @id @default(cuid())
+  transcriptId String
+  startSec     Float
+  endSec       Float
+  text         String
+  createdAt    DateTime   @default(now())
+  transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+
+  @@index([transcriptId, startSec])
 }

@@ -30,6 +30,32 @@ export class VideosController {
     return this.videos.list(auth.userId);
   }
 
+  @Get(':id/playback')
+  async playback(@CurrentUser() auth: AuthContext, @Param('id') id: string) {
+    return { url: await this.videos.getPlaybackUrl(auth.userId, id) };
+  }
+
+  @Get(':id/processing')
+  async getProcessingStatus(
+    @CurrentUser() auth: AuthContext,
+    @Param('id') id: string,
+  ) {
+    return this.videos.getProcessingJobs(auth.userId, id);
+  }
+
+  @Get(':id/transcript')
+  async getTranscript(
+    @CurrentUser() auth: AuthContext,
+    @Param('id') id: string,
+  ) {
+    return this.videos.getTranscript(auth.userId, id);
+  }
+
+  @Post(':id/transcribe')
+  async transcribe(@CurrentUser() auth: AuthContext, @Param('id') id: string) {
+    return this.videos.startTranscription(auth.userId, id);
+  }
+
   @Post()
   create(@CurrentUser() auth: AuthContext, @Body() dto: CreateVideoDto) {
     return this.videos.createUpload(auth.userId, dto.title);

@@ -23,7 +23,14 @@ export class RequestLoggerMiddleware implements NestMiddleware {
     response.on('finish', () => {
       const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
       this.logger.log(
-        `${request.method} ${request.originalUrl} ${response.statusCode} ${durationMs.toFixed(1)}ms id=${requestId}`,
+        JSON.stringify({
+          event: 'http_request',
+          method: request.method,
+          path: request.originalUrl,
+          statusCode: response.statusCode,
+          durationMs: Number(durationMs.toFixed(1)),
+          requestId,
+        }),
       );
     });
 

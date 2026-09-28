@@ -24,15 +24,39 @@ export interface StoredVideo {
   sizeBytes?: bigint;
 }
 
+export interface StoredClip {
+  id: string;
+  videoId: string;
+  title: string;
+  startSec: number;
+  endSec: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StoredUsageRecord {
+  id: string;
+  userId: string;
+  monthStart: Date;
+  uploadedSeconds: number;
+  clipCount: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export function createPrismaFake() {
   const store: StoredUser[] = [];
   const sessions: StoredSession[] = [];
   const videos: StoredVideo[] = [];
+  const clips: StoredClip[] = [];
+  const usageRecords: StoredUsageRecord[] = [];
 
   return {
     store,
     sessions,
     videos,
+    clips,
+    usageRecords,
     $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     $connect: jest.fn(),
     $disconnect: jest.fn(),
@@ -292,8 +316,179 @@ export function createPrismaFake() {
         const index = videos.findIndex((item) => item.id === where.id);
         if (index === -1) throw new Error('Video not found');
         const [video] = videos.splice(index, 1);
+        const remainingClips = clips.filter(
+          (clip) => clip.videoId !== video.id,
+        );
+        clips.splice(0, clips.length, ...remainingClips);
         return Promise.resolve(video);
       }),
+    },
+    clip: {
+      create: jest.fn(
+        ({
+          data,
+          select,
+        }: {
+          data: Pick<StoredClip, 'videoId' | 'title' | 'startSec' | 'endSec'>;
+          select: Record<string, boolean>;
+        }) => {
+          const now = new Date();
+          const clip: StoredClip = {
+            id: `clip-${clips.length + 1}`,
+            createdAt: now,
+            updatedAt: now,
+            ...data,
+          };
+          clips.push(clip);
+          return Promise.resolve(
+            Object.fromEntries(
+              Object.entries(clip).filter(([key]) => select[key]),
+            ),
+          );
+        },
+      ),
+      findMany: jest.fn(
+        ({
+          where,
+          select,
+        }: {
+          where: { videoId: string };
+          select: Record<string, boolean>;
+        }) =>
+          Promise.resolve(
+            clips
+              .filter((clip) => clip.videoId === where.videoId)
+              .slice()
+              .sort((left, right) => left.startSec - right.startSec)
+              .map((clip) =>
+                Object.fromEntries(
+                  Object.entries(clip).filter(([key]) => select[key]),
+                ),
+              ),
+          ),
+      ),
+      findFirst: jest.fn(
+        ({
+          where,
+          select,
+        }: {
+          where: { id: string; video: { is: { userId: string } } };
+          select: Record<string, boolean | { select: Record<string, boolean> }>;
+        }) => {
+          const clip = clips.find((item) => {
+            const video = videos.find(
+              (candidate) => candidate.id === item.videoId,
+            );
+            return (
+              item.id === where.id && video?.userId === where.video.is.userId
+            );
+          });
+          if (!clip) return Promise.resolve(null);
+
+          const selected = Object.fromEntries(
+            Object.entries(clip).filter(([key]) => select[key] === true),
+          ) as Record<string, unknown>;
+          const videoSelection = select.video;
+          if (typeof videoSelection === 'object') {
+            const video = videos.find((item) => item.id === clip.videoId)!;
+            selected.video = Object.fromEntries(
+              Object.entries(video).filter(
+                ([key]) => videoSelection.select[key],
+              ),
+            );
+          }
+          return Promise.resolve(selected);
+        },
+      ),
+      update: jest.fn(
+        ({
+          where,
+          data,
+          select,
+        }: {
+          where: { id: string };
+          data: Partial<Pick<StoredClip, 'title' | 'startSec' | 'endSec'>>;
+          select: Record<string, boolean>;
+        }) => {
+          const clip = clips.find((item) => item.id === where.id);
+          if (!clip) throw new Error('Clip not found');
+          Object.assign(clip, data, { updatedAt: new Date() });
+          return Promise.resolve(
+            Object.fromEntries(
+              Object.entries(clip).filter(([key]) => select[key]),
+            ),
+          );
+        },
+      ),
+      delete: jest.fn(({ where }: { where: { id: string } }) => {
+        const index = clips.findIndex((item) => item.id === where.id);
+        if (index === -1) throw new Error('Clip not found');
+        const [clip] = clips.splice(index, 1);
+        return Promise.resolve(clip);
+      }),
+    },
+    usageRecord: {
+      findUnique: jest.fn(
+        ({
+          where,
+          select,
+        }: {
+          where: { userId_monthStart: { userId: string; monthStart: Date } };
+          select: Record<string, boolean>;
+        }) => {
+          const record = usageRecords.find(
+            (item) =>
+              item.userId === where.userId_monthStart.userId &&
+              item.monthStart.getTime() ===
+                where.userId_monthStart.monthStart.getTime(),
+          );
+          if (!record) return Promise.resolve(null);
+          return Promise.resolve(
+            Object.fromEntries(
+              Object.entries(record).filter(([key]) => select[key]),
+            ),
+          );
+        },
+      ),
+      upsert: jest.fn(
+        ({
+          where,
+          create,
+          update,
+        }: {
+          where: { userId_monthStart: { userId: string; monthStart: Date } };
+          create: Pick<
+            StoredUsageRecord,
+            'userId' | 'monthStart' | 'uploadedSeconds' | 'clipCount'
+          >;
+          update: {
+            uploadedSeconds?: { increment: number };
+            clipCount?: { increment: number };
+          };
+        }) => {
+          const record = usageRecords.find(
+            (item) =>
+              item.userId === where.userId_monthStart.userId &&
+              item.monthStart.getTime() ===
+                where.userId_monthStart.monthStart.getTime(),
+          );
+          if (record) {
+            record.uploadedSeconds += update.uploadedSeconds?.increment ?? 0;
+            record.clipCount += update.clipCount?.increment ?? 0;
+            record.updatedAt = new Date();
+            return Promise.resolve(record);
+          }
+          const now = new Date();
+          const created: StoredUsageRecord = {
+            id: `usage-${usageRecords.length + 1}`,
+            createdAt: now,
+            updatedAt: now,
+            ...create,
+          };
+          usageRecords.push(created);
+          return Promise.resolve(created);
+        },
+      ),
     },
   };
 }

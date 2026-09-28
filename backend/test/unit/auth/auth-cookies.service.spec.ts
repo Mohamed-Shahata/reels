@@ -3,9 +3,13 @@ import type { Request, Response } from 'express';
 import type { Env } from '../../../src/config/env.schema';
 import { AuthCookiesService } from '../../../src/auth/auth-cookies.service';
 
-function setup(nodeEnv: string) {
+function setup(
+  nodeEnv: string,
+  cookieSameSite: 'lax' | 'none' | 'strict' = 'lax',
+) {
   const values: Record<string, unknown> = {
     NODE_ENV: nodeEnv,
+    COOKIE_SAME_SITE: cookieSameSite,
     ACCESS_TOKEN_TTL_SEC: 900,
     REFRESH_TOKEN_TTL_SEC: 3600,
   };
@@ -54,6 +58,18 @@ describe('AuthCookiesService', () => {
       'access_token',
       'a',
       expect.objectContaining({ secure: true }),
+    );
+  });
+
+  it('uses an explicitly configured cross-site cookie policy', () => {
+    const { service, response, cookie } = setup('production', 'none');
+
+    service.setSession(response, { accessToken: 'a', refreshToken: 'r' });
+
+    expect(cookie).toHaveBeenCalledWith(
+      'access_token',
+      'a',
+      expect.objectContaining({ sameSite: 'none', secure: true }),
     );
   });
 

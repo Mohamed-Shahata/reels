@@ -9,7 +9,7 @@
   "scripts": {
     "prepare": "husky",
     "install:all": "npm install && npm --prefix backend install && npm --prefix frontend install",
-    "db:up": "docker compose up -d postgres",
+    "db:up": "docker compose up -d postgres redis",
     "db:down": "docker compose down",
     "dev:backend": "npm --prefix backend run start:dev",
     "dev:frontend": "npm --prefix frontend run dev",

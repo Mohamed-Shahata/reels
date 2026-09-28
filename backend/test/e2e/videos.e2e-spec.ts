@@ -22,6 +22,9 @@ describe('POST /api/v1/videos (e2e)', () => {
     getUploadConstraints: jest.Mock;
     getVideoMetadata: jest.Mock;
     deleteVideo: jest.Mock;
+    getClipPlaybackUrl: jest.Mock;
+    getClipDownloadUrl: jest.Mock;
+    getVideoPlaybackUrl: jest.Mock;
     getVideoPublicId: jest.Mock;
     getLegacyVideoPublicIds: jest.Mock;
   };
@@ -48,6 +51,9 @@ describe('POST /api/v1/videos (e2e)', () => {
       }),
       getVideoMetadata: jest.fn(),
       deleteVideo: jest.fn().mockResolvedValue(undefined),
+      getClipPlaybackUrl: jest.fn().mockReturnValue('https://preview.example'),
+      getClipDownloadUrl: jest.fn().mockReturnValue('https://download.example'),
+      getVideoPlaybackUrl: jest.fn().mockReturnValue('https://video.example'),
       getVideoPublicId: jest.fn(
         (userId: string, videoId: string) =>
           `podcast-reels/uploads/${userId}/${videoId}`,
@@ -281,6 +287,284 @@ describe('POST /api/v1/videos (e2e)', () => {
       cloudinaryId: 'podcast-reels/uploads/user-1/video-1',
       status: 'READY',
     });
+    expect(prisma.usageRecords).toEqual([
+      expect.objectContaining({
+        userId: 'user-1',
+        uploadedSeconds: 64.5,
+        clipCount: 0,
+      }),
+    ]);
+  });
+
+  it('returns the authenticated user monthly usage after uploads and clips', async () => {
+    const cookies = await registerAndLogin('user@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', cookies)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 120,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', cookies)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', cookies)
+      .send({ title: 'First clip', startSec: 10, endSec: 30 })
+      .expect(201);
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', cookies)
+      .send({ title: 'Second clip', startSec: 35, endSec: 55 })
+      .expect(201);
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/usage?month=2026-09')
+      .set('Cookie', cookies)
+      .expect(200);
+    expect(response.body).toEqual({
+      month: '2026-09',
+      uploadedMinutes: 2,
+      clipCount: 2,
+    });
+
+    const otherUser = await registerAndLogin('other@example.com');
+    await request(app.getHttpServer())
+      .get('/api/v1/usage?month=2026-09')
+      .set('Cookie', otherUser)
+      .expect(200)
+      .expect({ month: '2026-09', uploadedMinutes: 0, clipCount: 0 });
+  });
+
+  it('completes the local MVP flow for a one-hour video and five downloads', async () => {
+    const cookies = await registerAndLogin('mvp@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', cookies)
+      .send({ title: 'One-hour podcast' })
+      .expect(201);
+
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 60 * 60,
+      bytes: 250_000_000n,
+    });
+    const completed = await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', cookies)
+      .expect(200);
+    expect(completed.body).toEqual(
+      expect.objectContaining({ durationSec: 3600, status: 'READY' }),
+    );
+
+    for (let index = 0; index < 5; index += 1) {
+      const startSec = 60 + index * 120;
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/clips')
+        .set('Cookie', cookies)
+        .send({
+          title: `Highlight ${index + 1}`,
+          startSec,
+          endSec: startSec + 30,
+        })
+        .expect(201);
+    }
+
+    const clips = await request(app.getHttpServer())
+      .get('/api/v1/videos/video-1/clips')
+      .set('Cookie', cookies)
+      .expect(200);
+    expect(clips.body).toHaveLength(5);
+
+    for (const clip of clips.body as { id: string }[]) {
+      await request(app.getHttpServer())
+        .get(`/api/v1/clips/${clip.id}/download`)
+        .set('Cookie', cookies)
+        .expect(200)
+        .expect({ url: 'https://download.example' });
+    }
+
+    expect(storage.getClipDownloadUrl).toHaveBeenCalledTimes(5);
+    expect(prisma.usageRecords).toEqual([
+      expect.objectContaining({
+        userId: 'user-1',
+        uploadedSeconds: 3600,
+        clipCount: 5,
+      }),
+    ]);
+  });
+
+  it('creates, lists, updates and deletes clips for an owned ready video', async () => {
+    const cookies = await registerAndLogin('user@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', cookies)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 64.5,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', cookies)
+      .expect(200);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', cookies)
+      .send({ title: '  Key takeaway  ', startSec: 10, endSec: 30 })
+      .expect(201);
+
+    expect(created.body).toMatchObject({
+      id: 'clip-1',
+      videoId: 'video-1',
+      title: 'Key takeaway',
+      startSec: 10,
+      endSec: 30,
+    });
+
+    const listed = await request(app.getHttpServer())
+      .get('/api/v1/videos/video-1/clips')
+      .set('Cookie', cookies)
+      .expect(200);
+    expect(listed.body).toEqual([
+      expect.objectContaining({ id: 'clip-1', title: 'Key takeaway' }),
+    ]);
+
+    const updated = await request(app.getHttpServer())
+      .patch('/api/v1/clips/clip-1')
+      .set('Cookie', cookies)
+      .send({ endSec: 35 })
+      .expect(200);
+    expect(updated.body).toEqual(expect.objectContaining({ endSec: 35 }));
+
+    await request(app.getHttpServer())
+      .delete('/api/v1/clips/clip-1')
+      .set('Cookie', cookies)
+      .expect(204);
+    expect(prisma.clips).toHaveLength(0);
+  });
+
+  it('returns preview and download URLs only to the clip owner', async () => {
+    const owner = await registerAndLogin('owner@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', owner)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 64.5,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', owner)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', owner)
+      .send({ title: 'Valid range', startSec: 10, endSec: 30 })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/playback')
+      .set('Cookie', owner)
+      .expect(200)
+      .expect({ url: 'https://preview.example' });
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/download')
+      .set('Cookie', owner)
+      .expect(200)
+      .expect({ url: 'https://download.example' });
+
+    const otherUser = await registerAndLogin('other@example.com');
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/playback')
+      .set('Cookie', otherUser)
+      .expect(404);
+  });
+
+  it('returns an original playback URL only to the ready video owner', async () => {
+    const owner = await registerAndLogin('owner@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', owner)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 64.5,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', owner)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/videos/video-1/playback')
+      .set('Cookie', owner)
+      .expect(200)
+      .expect({ url: 'https://video.example' });
+
+    const otherUser = await registerAndLogin('other@example.com');
+    await request(app.getHttpServer())
+      .get('/api/v1/videos/video-1/playback')
+      .set('Cookie', otherUser)
+      .expect(404);
+  });
+
+  it('rejects invalid clip ranges and cross-user clip access', async () => {
+    const owner = await registerAndLogin('owner@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', owner)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 64.5,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', owner)
+      .expect(200);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', owner)
+      .send({ title: 'Too short', startSec: 10, endSec: 14 })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', owner)
+      .send({ title: 'Valid range', startSec: 10, endSec: 30 })
+      .expect(201);
+
+    const otherUser = await registerAndLogin('other@example.com');
+    await request(app.getHttpServer())
+      .get('/api/v1/videos/video-1/clips')
+      .set('Cookie', otherUser)
+      .expect(404);
+    await request(app.getHttpServer())
+      .patch('/api/v1/clips/clip-1')
+      .set('Cookie', otherUser)
+      .send({ title: 'Not allowed' })
+      .expect(404);
+    await request(app.getHttpServer())
+      .delete('/api/v1/clips/clip-1')
+      .set('Cookie', otherUser)
+      .expect(404);
   });
 
   it('marks the pending video failed when Cloudinary cannot verify it', async () => {

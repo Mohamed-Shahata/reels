@@ -2,11 +2,13 @@ import { validateEnv } from '../../../src/config/env.schema';
 
 const validEnv = {
   DATABASE_URL: 'postgresql://user:pass@localhost:5432/db',
+  REDIS_URL: 'redis://localhost:6379',
   CORS_ORIGIN: 'http://localhost:3000, https://app.example.com',
   JWT_ACCESS_SECRET: 'x'.repeat(32),
   CLOUDINARY_CLOUD_NAME: 'cloud',
   CLOUDINARY_API_KEY: 'key',
   CLOUDINARY_API_SECRET: 'secret',
+  GROQ_API_KEY: 'gsk_test_key',
 };
 
 describe('validateEnv', () => {
@@ -15,6 +17,7 @@ describe('validateEnv', () => {
 
     expect(env.NODE_ENV).toBe('development');
     expect(env.PORT).toBe(4000);
+    expect(env.COOKIE_SAME_SITE).toBe('lax');
     expect(env.ACCESS_TOKEN_TTL_SEC).toBe(900);
     expect(env.REFRESH_TOKEN_TTL_SEC).toBe(2592000);
     expect(env.AUTH_RATE_LIMIT_TTL_SEC).toBe(60);
@@ -23,6 +26,8 @@ describe('validateEnv', () => {
     expect(env.VIDEO_ALLOWED_FORMATS).toEqual(['mp4', 'mov', 'webm']);
     expect(env.VIDEO_MAX_SIZE_BYTES).toBe(5 * 1024 * 1024 * 1024);
     expect(env.VIDEO_MAX_DURATION_SEC).toBe(4 * 60 * 60);
+    expect(env.CLIP_MIN_DURATION_SEC).toBe(5);
+    expect(env.CLIP_MAX_DURATION_SEC).toBe(180);
     expect(env.STALE_UPLOAD_THRESHOLD_SEC).toBe(86400);
     expect(env.STALE_UPLOAD_CLEANUP_INTERVAL_SEC).toBe(3600);
     expect(env.CORS_ORIGIN).toEqual([
@@ -62,6 +67,12 @@ describe('validateEnv', () => {
     ).toThrow(/AUTH_RATE_LIMIT_MAX/);
   });
 
+  it('accepts a cross-site cookie setting for separately hosted staging apps', () => {
+    expect(
+      validateEnv({ ...validEnv, COOKIE_SAME_SITE: 'none' }).COOKIE_SAME_SITE,
+    ).toBe('none');
+  });
+
   it('normalizes configured video formats and rejects invalid limits', () => {
     expect(
       validateEnv({ ...validEnv, VIDEO_ALLOWED_FORMATS: 'MP4, webm ' })
@@ -73,6 +84,13 @@ describe('validateEnv', () => {
     expect(() =>
       validateEnv({ ...validEnv, VIDEO_MAX_DURATION_SEC: '0' }),
     ).toThrow(/VIDEO_MAX_DURATION_SEC/);
+    expect(() =>
+      validateEnv({
+        ...validEnv,
+        CLIP_MIN_DURATION_SEC: '181',
+        CLIP_MAX_DURATION_SEC: '180',
+      }),
+    ).toThrow(/CLIP_MAX_DURATION_SEC/);
     expect(() =>
       validateEnv({ ...validEnv, STALE_UPLOAD_THRESHOLD_SEC: '59' }),
     ).toThrow(/STALE_UPLOAD_THRESHOLD_SEC/);

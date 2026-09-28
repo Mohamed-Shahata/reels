@@ -1,8 +1,9 @@
 'use client';
 
-import { ApiError, api, type LibraryVideo } from '@/lib/api';
+import { api, getApiErrorMessage, type LibraryVideo } from '@/lib/api';
 import { clearPendingUploadByVideoId } from '@/lib/upload-store';
 import { useAuth } from '@/components/auth/auth-provider';
+import { PageLoading } from '@/components/common/page-loading';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
@@ -32,9 +33,7 @@ export default function Home() {
       .then(setVideos)
       .catch((requestError) => {
         setError(
-          requestError instanceof Error
-            ? requestError.message
-            : 'Videos could not be loaded.',
+          getApiErrorMessage(requestError, 'Videos could not be loaded.'),
         );
       })
       .finally(() => setLoadingVideos(false));
@@ -65,11 +64,7 @@ export default function Home() {
       );
       setEditingId(null);
     } catch (requestError) {
-      setError(
-        requestError instanceof ApiError
-          ? requestError.message
-          : 'Video could not be renamed.',
-      );
+      setError(getApiErrorMessage(requestError, 'Video could not be renamed.'));
     } finally {
       setSavingId(null);
     }
@@ -87,18 +82,18 @@ export default function Home() {
       clearPendingUploadByVideoId(video.id);
       setVideos((current) => current.filter((item) => item.id !== video.id));
     } catch (requestError) {
-      setError(
-        requestError instanceof ApiError
-          ? requestError.message
-          : 'Video could not be deleted.',
-      );
+      setError(getApiErrorMessage(requestError, 'Video could not be deleted.'));
     } finally {
       setSavingId(null);
     }
   }
 
+  if (status === 'loading') {
+    return <PageLoading label="Loading workspace..." />;
+  }
+
   if (status !== 'authenticated' || !user) {
-    return <main className="min-h-screen bg-[#f6f8f7]" />;
+    return null;
   }
 
   return (
@@ -177,6 +172,13 @@ export default function Home() {
                             }
                             value={draftTitle}
                           />
+                        ) : video.status === 'READY' ? (
+                          <Link
+                            className="block truncate text-lg font-semibold hover:text-[#0f766e]"
+                            href={`/videos/${video.id}`}
+                          >
+                            {video.title}
+                          </Link>
                         ) : (
                           <h2 className="truncate text-lg font-semibold">
                             {video.title}

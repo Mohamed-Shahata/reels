@@ -6,10 +6,14 @@ const user = {
   createdAt: '2026-09-28T10:00:00.000Z',
 };
 
-function response(body: unknown, status = 200): Response {
+function response(body: unknown, status = 200, requestId?: string): Response {
   return {
     ok: status >= 200 && status < 300,
     status,
+    headers: {
+      get: (name: string) =>
+        name.toLowerCase() === 'x-request-id' ? (requestId ?? null) : null,
+    },
     json: async () => body,
   } as Response;
 }
@@ -200,6 +204,81 @@ describe('api', () => {
     );
   });
 
+  it('creates clips through the authenticated API', async () => {
+    const clip = {
+      id: 'clip-1',
+      videoId: 'video-1',
+      title: 'Key takeaway',
+      startSec: 10,
+      endSec: 30,
+      createdAt: '2026-09-28T10:00:00.000Z',
+      updatedAt: '2026-09-28T10:00:00.000Z',
+    };
+    fetchMock.mockResolvedValue(response(clip, 201));
+
+    await expect(
+      api.createClip('video-1', {
+        title: 'Key takeaway',
+        startSec: 10,
+        endSec: 30,
+      }),
+    ).resolves.toEqual(clip);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/videos\/video-1\/clips$/),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: JSON.stringify({
+          title: 'Key takeaway',
+          startSec: 10,
+          endSec: 30,
+        }),
+      }),
+    );
+  });
+
+  it('updates, deletes and gets a download URL for a clip', async () => {
+    const clip = {
+      id: 'clip-1',
+      videoId: 'video-1',
+      title: 'Updated takeaway',
+      startSec: 10,
+      endSec: 35,
+      createdAt: '2026-09-28T10:00:00.000Z',
+      updatedAt: '2026-09-28T10:05:00.000Z',
+    };
+    fetchMock
+      .mockResolvedValueOnce(response(clip))
+      .mockResolvedValueOnce(response(null, 204))
+      .mockResolvedValueOnce(response({ url: 'https://download.example' }));
+
+    await expect(api.updateClip('clip-1', { endSec: 35 })).resolves.toEqual(
+      clip,
+    );
+    await expect(api.deleteClip('clip-1')).resolves.toBeUndefined();
+    await expect(api.getClipDownloadUrl('clip-1')).resolves.toEqual({
+      url: 'https://download.example',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/\/clips\/clip-1$/),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ endSec: 35 }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/\/clips\/clip-1$/),
+      expect.objectContaining({ method: 'DELETE' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      expect.stringMatching(/\/clips\/clip-1\/download$/),
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
   it('surfaces the API error message to the form layer', async () => {
     fetchMock.mockResolvedValue(
       response({ message: 'Invalid email or password' }, 401),
@@ -208,5 +287,17 @@ describe('api', () => {
     await expect(api.login('user@example.com', 'wrong-pass-1')).rejects.toEqual(
       new ApiError('Invalid email or password', 401),
     );
+  });
+
+  it('keeps the request ID so the UI can reference the API log', async () => {
+    fetchMock.mockResolvedValue(
+      response({ message: 'Upload was not found' }, 404, 'req-upload-1'),
+    );
+
+    await expect(api.getVideos()).rejects.toMatchObject({
+      message: 'Upload was not found',
+      requestId: 'req-upload-1',
+      status: 404,
+    });
   });
 });

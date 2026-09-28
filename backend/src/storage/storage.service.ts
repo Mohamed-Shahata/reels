@@ -85,6 +85,53 @@ export class StorageService {
     });
   }
 
+  getClipPlaybackUrl(
+    publicId: string,
+    startSec: number,
+    endSec: number,
+  ): string {
+    return cloudinary.url(publicId, {
+      resource_type: 'video',
+      secure: true,
+      format: 'mp4',
+      transformation: [{ start_offset: startSec, end_offset: endSec }],
+    });
+  }
+
+  getVideoPlaybackUrl(publicId: string): string {
+    return cloudinary.url(publicId, {
+      resource_type: 'video',
+      secure: true,
+      format: 'mp4',
+    });
+  }
+
+  getAudioDownloadUrl(publicId: string): string {
+    return cloudinary.url(publicId, {
+      resource_type: 'video',
+      secure: true,
+      format: 'mp3',
+      transformation: [
+        { audio_codec: 'mp3', audio_frequency: 16000, bit_rate: '64k' },
+      ],
+    });
+  }
+
+  getClipDownloadUrl(
+    publicId: string,
+    startSec: number,
+    endSec: number,
+    filename: string,
+  ): string {
+    return cloudinary.url(publicId, {
+      resource_type: 'video',
+      secure: true,
+      format: 'mp4',
+      flags: `streaming_attachment:${filename}`,
+      transformation: [{ start_offset: startSec, end_offset: endSec }],
+    });
+  }
+
   getVideoPublicId(userId: string, videoId: string): string {
     return [this.folder, 'uploads', userId, videoId].filter(Boolean).join('/');
   }

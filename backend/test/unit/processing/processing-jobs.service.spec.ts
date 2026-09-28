@@ -1,0 +1,117 @@
+import { NotFoundException } from '@nestjs/common';
+import type { ProcessingJob } from '../../../src/generated/prisma/client';
+import type { PrismaService } from '../../../src/prisma/prisma.service';
+import type { ProcessingQueueClient } from '../../../src/processing/processing.constants';
+import { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
+
+function buildJob(overrides: Partial<ProcessingJob> = {}): ProcessingJob {
+  return {
+    id: 'job-1',
+    userId: 'user-1',
+    videoId: 'video-1',
+    type: 'TRANSCRIPTION',
+    status: 'PENDING',
+    bullJobId: 'job-1',
+    progress: 0,
+    attempts: 0,
+    lastError: null,
+    payload: null,
+    startedAt: null,
+    completedAt: null,
+    failedAt: null,
+    createdAt: new Date('2026-09-28T00:00:00.000Z'),
+    updatedAt: new Date('2026-09-28T00:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+describe('ProcessingJobsService', () => {
+  it('creates a persisted job and enqueues it', async () => {
+    const created = buildJob({ bullJobId: null });
+    const persisted = buildJob();
+    const enqueue = jest.fn().mockResolvedValue(undefined);
+    const ensureQueued = jest.fn();
+    const queue: ProcessingQueueClient = { enqueue, ensureQueued };
+    const processingJob = {
+      create: jest.fn().mockResolvedValue(created),
+      update: jest.fn().mockResolvedValue(persisted),
+      findMany: jest.fn(),
+    };
+    const service = new ProcessingJobsService(
+      { processingJob } as unknown as PrismaService,
+      queue,
+    );
+
+    await expect(
+      service.createJob({
+        userId: 'user-1',
+        videoId: 'video-1',
+        type: 'TRANSCRIPTION',
+      }),
+    ).resolves.toEqual(persisted);
+
+    expect(processingJob.create).toHaveBeenCalledWith({
+      data: {
+        userId: 'user-1',
+        videoId: 'video-1',
+        type: 'TRANSCRIPTION',
+        status: 'PENDING',
+        payload: undefined,
+        bullJobId: undefined,
+      },
+    });
+    expect(enqueue).toHaveBeenCalledWith({
+      processingJobId: 'job-1',
+      type: 'TRANSCRIPTION',
+    });
+    expect(processingJob.update).toHaveBeenCalledWith({
+      where: { id: 'job-1' },
+      data: { bullJobId: 'job-1' },
+    });
+  });
+
+  it('re-queues persisted pending and running jobs on recovery', async () => {
+    const pending = buildJob({ id: 'job-pending', status: 'PENDING' });
+    const running = buildJob({ id: 'job-running', status: 'RUNNING' });
+    const enqueue = jest.fn();
+    const ensureQueued = jest.fn().mockResolvedValue(undefined);
+    const queue: ProcessingQueueClient = { enqueue, ensureQueued };
+    const processingJob = {
+      findMany: jest.fn().mockResolvedValue([pending, running]),
+      update: jest.fn().mockResolvedValue(undefined),
+    };
+    const service = new ProcessingJobsService(
+      { processingJob } as unknown as PrismaService,
+      queue,
+    );
+
+    await expect(service.recoverPersistedJobs()).resolves.toBe(2);
+
+    expect(processingJob.update).toHaveBeenCalledWith({
+      where: { id: 'job-running' },
+      data: { status: 'PENDING', startedAt: null },
+    });
+    expect(ensureQueued).toHaveBeenCalledTimes(2);
+    expect(ensureQueued).toHaveBeenCalledWith({
+      processingJobId: 'job-pending',
+      type: 'TRANSCRIPTION',
+    });
+    expect(ensureQueued).toHaveBeenCalledWith({
+      processingJobId: 'job-running',
+      type: 'TRANSCRIPTION',
+    });
+  });
+
+  it('throws when a job is missing', async () => {
+    const service = new ProcessingJobsService(
+      {
+        processingJob: { findUnique: jest.fn().mockResolvedValue(null) },
+      } as unknown as PrismaService,
+      { enqueue: jest.fn(), ensureQueued: jest.fn() },
+    );
+
+    await expect(service.getById('missing')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});
