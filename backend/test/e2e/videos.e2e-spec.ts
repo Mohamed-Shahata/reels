@@ -7,6 +7,7 @@ import { configureApp } from '../../src/app.setup';
 import type { ErrorResponseBody } from '../../src/common/filters/all-exceptions.filter';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { StorageService } from '../../src/storage/storage.service';
+import { TopicSegmentationService } from '../../src/segmentation/topic-segmentation.service';
 import { createPrismaFake } from '../support/prisma-fake';
 
 interface CreateVideoResponse {
@@ -28,6 +29,7 @@ describe('POST /api/v1/videos (e2e)', () => {
     getVideoPublicId: jest.Mock;
     getLegacyVideoPublicIds: jest.Mock;
   };
+  let segmentation: { suggest: jest.Mock };
 
   beforeEach(async () => {
     prisma = createPrismaFake();
@@ -63,12 +65,15 @@ describe('POST /api/v1/videos (e2e)', () => {
         `podcast-reels/videos/${userId}/${videoId}`,
       ]),
     };
+    segmentation = { suggest: jest.fn() };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
       .useValue(prisma)
       .overrideProvider(StorageService)
       .useValue(storage)
+      .overrideProvider(TopicSegmentationService)
+      .useValue(segmentation)
       .compile();
 
     app = moduleRef.createNestApplication();
@@ -450,6 +455,98 @@ describe('POST /api/v1/videos (e2e)', () => {
       .set('Cookie', cookies)
       .expect(204);
     expect(prisma.clips).toHaveLength(0);
+  });
+
+  it('creates a full AI suggestion set after the segmentation pipeline succeeds', async () => {
+    const cookies = await registerAndLogin('user@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', cookies)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 64.5,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', cookies)
+      .expect(200);
+    segmentation.suggest.mockResolvedValue([
+      { title: 'Opening', startSec: 0, endSec: 30, summary: 'Opening topic.' },
+      { title: 'Close', startSec: 30, endSec: 64.5, summary: 'Closing topic.' },
+    ]);
+
+    const created = await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/ai-clips')
+      .set('Cookie', cookies)
+      .expect(201);
+
+    expect(created.body).toEqual([
+      expect.objectContaining({ title: 'Opening', source: 'AI' }),
+      expect.objectContaining({ title: 'Close', source: 'AI' }),
+    ]);
+    expect(segmentation.suggest).toHaveBeenCalledWith('user-1', 'video-1');
+    const overridden = await request(app.getHttpServer())
+      .patch('/api/v1/clips/clip-1')
+      .set('Cookie', cookies)
+      .send({ title: 'Edited opening' })
+      .expect(200);
+    expect(overridden.body).toMatchObject({
+      title: 'Edited opening',
+      source: 'MANUAL',
+    });
+    expect(prisma.usageRecords).toEqual([
+      expect.objectContaining({ userId: 'user-1', clipCount: 2 }),
+    ]);
+  });
+
+  it('splits a clip at a valid point and merges the selected clips again', async () => {
+    const cookies = await registerAndLogin('user@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', cookies)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 64.5,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', cookies)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', cookies)
+      .send({ title: 'Key takeaway', startSec: 10, endSec: 40 })
+      .expect(201);
+
+    const split = await request(app.getHttpServer())
+      .post('/api/v1/clips/clip-1/split')
+      .set('Cookie', cookies)
+      .send({ splitSec: 25 })
+      .expect(201);
+    expect(split.body).toEqual([
+      expect.objectContaining({ id: 'clip-1', startSec: 10, endSec: 25 }),
+      expect.objectContaining({ id: 'clip-2', startSec: 25, endSec: 40 }),
+    ]);
+
+    const merged = await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips/merge')
+      .set('Cookie', cookies)
+      .send({ clipIds: ['clip-1', 'clip-2'], title: 'Merged takeaway' })
+      .expect(201);
+    expect(merged.body).toMatchObject({
+      id: 'clip-1',
+      title: 'Merged takeaway',
+      startSec: 10,
+      endSec: 40,
+      source: 'MANUAL',
+    });
+    expect(prisma.clips).toHaveLength(1);
   });
 
   it('returns preview and download URLs only to the clip owner', async () => {

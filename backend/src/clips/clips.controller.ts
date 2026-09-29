@@ -12,12 +12,18 @@ import {
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthContext } from '../auth/jwt-auth.guard';
 import { ClipsService } from './clips.service';
+import { TopicSegmentationService } from '../segmentation/topic-segmentation.service';
 import { CreateClipDto } from './dto/create-clip.dto';
 import { UpdateClipDto } from './dto/update-clip.dto';
+import { SplitClipDto } from './dto/split-clip.dto';
+import { MergeClipsDto } from './dto/merge-clips.dto';
 
 @Controller()
 export class ClipsController {
-  constructor(private readonly clips: ClipsService) {}
+  constructor(
+    private readonly clips: ClipsService,
+    private readonly segmentation: TopicSegmentationService,
+  ) {}
 
   @Post('videos/:videoId/clips')
   create(
@@ -26,6 +32,24 @@ export class ClipsController {
     @Body() dto: CreateClipDto,
   ) {
     return this.clips.create(auth.userId, videoId, dto);
+  }
+
+  @Post('videos/:videoId/ai-clips')
+  async createAiSuggestions(
+    @CurrentUser() auth: AuthContext,
+    @Param('videoId') videoId: string,
+  ) {
+    const segments = await this.segmentation.suggest(auth.userId, videoId);
+    return this.clips.createAiSuggestions(auth.userId, videoId, segments);
+  }
+
+  @Post('videos/:videoId/clips/merge')
+  merge(
+    @CurrentUser() auth: AuthContext,
+    @Param('videoId') videoId: string,
+    @Body() dto: MergeClipsDto,
+  ) {
+    return this.clips.merge(auth.userId, videoId, dto);
   }
 
   @Get('videos/:videoId/clips')
@@ -40,6 +64,15 @@ export class ClipsController {
     @Body() dto: UpdateClipDto,
   ) {
     return this.clips.update(auth.userId, id, dto);
+  }
+
+  @Post('clips/:id/split')
+  split(
+    @CurrentUser() auth: AuthContext,
+    @Param('id') id: string,
+    @Body() dto: SplitClipDto,
+  ) {
+    return this.clips.split(auth.userId, id, dto);
   }
 
   @Get('clips/:id/playback')

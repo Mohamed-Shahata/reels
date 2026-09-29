@@ -41,6 +41,7 @@ describe('API foundations (e2e)', () => {
         $queryRaw: queryRaw,
         $connect: jest.fn(),
         $disconnect: jest.fn(),
+        processingJob: { findMany: jest.fn().mockResolvedValue([]) },
       })
       .compile();
 

@@ -32,11 +32,13 @@ export default function VideoWorkspacePage() {
   const [endInput, setEndInput] = useState('0:00');
   const [previewEndSec, setPreviewEndSec] = useState<number | null>(null);
   const [savingClip, setSavingClip] = useState(false);
+  const [creatingAiClips, setCreatingAiClips] = useState(false);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingStart, setEditingStart] = useState('0:00');
   const [editingEnd, setEditingEnd] = useState('0:00');
   const [clipActionId, setClipActionId] = useState<string | null>(null);
+  const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -201,6 +203,27 @@ export default function VideoWorkspacePage() {
     }
   }
 
+  async function createAiClips() {
+    if (!params.id) return;
+    setCreatingAiClips(true);
+    setError(null);
+    try {
+      const created = await api.createAiClips(params.id);
+      setClips((current) =>
+        [...current, ...created].sort((a, b) => a.startSec - b.startSec),
+      );
+    } catch (requestError) {
+      setError(
+        getApiErrorMessage(
+          requestError,
+          'AI clip suggestions could not be created.',
+        ),
+      );
+    } finally {
+      setCreatingAiClips(false);
+    }
+  }
+
   function beginEdit(clip: Clip) {
     setEditingClipId(clip.id);
     setEditingTitle(clip.title);
@@ -248,6 +271,62 @@ export default function VideoWorkspacePage() {
       if (editingClipId === clip.id) setEditingClipId(null);
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, 'Clip could not be deleted.'));
+    } finally {
+      setClipActionId(null);
+    }
+  }
+
+  async function splitClip(clip: Clip) {
+    setClipActionId(clip.id);
+    setError(null);
+    try {
+      const split = await api.splitClip(clip.id, currentTime);
+      setClips((current) =>
+        current
+          .filter((item) => item.id !== clip.id)
+          .concat(split)
+          .sort((a, b) => a.startSec - b.startSec),
+      );
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, 'Clip could not be split.'));
+    } finally {
+      setClipActionId(null);
+    }
+  }
+
+  function toggleClipSelection(clipId: string) {
+    setSelectedClipIds((current) =>
+      current.includes(clipId)
+        ? current.filter((id) => id !== clipId)
+        : [...current, clipId],
+    );
+  }
+
+  async function mergeSelectedClips() {
+    if (!params.id || selectedClipIds.length < 2) return;
+    const selected = clips.filter((clip) => selectedClipIds.includes(clip.id));
+    const title = window.prompt(
+      'Title for the merged clip',
+      selected[0]?.title,
+    );
+    if (!title?.trim()) return;
+
+    setClipActionId('merge');
+    setError(null);
+    try {
+      const merged = await api.mergeClips(params.id, {
+        clipIds: selectedClipIds,
+        title: title.trim(),
+      });
+      setClips((current) =>
+        current
+          .filter((clip) => !selectedClipIds.includes(clip.id))
+          .concat(merged)
+          .sort((a, b) => a.startSec - b.startSec),
+      );
+      setSelectedClipIds([]);
+    } catch (requestError) {
+      setError(getApiErrorMessage(requestError, 'Clips could not be merged.'));
     } finally {
       setClipActionId(null);
     }
@@ -494,10 +573,32 @@ export default function VideoWorkspacePage() {
                   (j) => j.status === 'PENDING' || j.status === 'RUNNING',
                 )}
               />
+              {transcript?.segments.length ? (
+                <button
+                  className="mt-5 h-10 w-full bg-[#0f766e] px-4 text-sm font-semibold text-white hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
+                  disabled={creatingAiClips}
+                  onClick={() => void createAiClips()}
+                  type="button"
+                >
+                  {creatingAiClips ? 'Creating AI clips' : 'Create AI clips'}
+                </button>
+              ) : null}
             </div>
 
             <aside className="border-t border-[#d8e1dc] pt-5 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
-              <h2 className="text-base font-semibold">Existing clips</h2>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base font-semibold">Existing clips</h2>
+                {selectedClipIds.length >= 2 ? (
+                  <button
+                    className="h-8 bg-[#0f766e] px-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
+                    disabled={clipActionId !== null}
+                    onClick={() => void mergeSelectedClips()}
+                    type="button"
+                  >
+                    {clipActionId === 'merge' ? 'Merging' : 'Merge selected'}
+                  </button>
+                ) : null}
+              </div>
               {clips.length === 0 ? (
                 <p className="mt-3 text-sm text-[#5f6e69]">No saved clips.</p>
               ) : (
@@ -559,13 +660,27 @@ export default function VideoWorkspacePage() {
                           </div>
                         ) : (
                           <>
-                            <button
-                              className="w-full text-left text-sm font-semibold text-[#172321] hover:text-[#0f766e]"
-                              onClick={() => void previewClip(clip)}
-                              type="button"
-                            >
-                              {clip.title}
-                            </button>
+                            <div className="flex items-start justify-between gap-2">
+                              <label className="flex min-w-0 items-start gap-2">
+                                <input
+                                  aria-label={`Select ${clip.title} for merge`}
+                                  checked={selectedClipIds.includes(clip.id)}
+                                  disabled={busy}
+                                  onChange={() => toggleClipSelection(clip.id)}
+                                  type="checkbox"
+                                />
+                                <button
+                                  className="min-w-0 text-left text-sm font-semibold text-[#172321] hover:text-[#0f766e]"
+                                  onClick={() => void previewClip(clip)}
+                                  type="button"
+                                >
+                                  {clip.title}
+                                </button>
+                              </label>
+                              <span className="shrink-0 text-xs font-medium text-[#5f6e69]">
+                                {clip.source === 'AI' ? 'AI' : 'Manual'}
+                              </span>
+                            </div>
                             <button
                               className="mt-1 text-sm text-[#0f766e] underline"
                               onClick={() => seekTo(clip.startSec)}
@@ -582,6 +697,18 @@ export default function VideoWorkspacePage() {
                                 type="button"
                               >
                                 Edit
+                              </button>
+                              <button
+                                className="h-8 border border-[#a9bab3] px-2 text-xs font-medium hover:border-[#0f766e] disabled:cursor-not-allowed disabled:opacity-50"
+                                disabled={
+                                  busy ||
+                                  currentTime - clip.startSec < 5 ||
+                                  clip.endSec - currentTime < 5
+                                }
+                                onClick={() => void splitClip(clip)}
+                                type="button"
+                              >
+                                Split here
                               </button>
                               <button
                                 className="h-8 border border-[#a9bab3] px-2 text-xs font-medium hover:border-[#0f766e]"

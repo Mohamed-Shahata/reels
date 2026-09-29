@@ -10,6 +10,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import type { CreateClipDto } from './dto/create-clip.dto';
 import type { UpdateClipDto } from './dto/update-clip.dto';
+import type { SplitClipDto } from './dto/split-clip.dto';
+import type { MergeClipsDto } from './dto/merge-clips.dto';
+import type { ReconciledTopicSegment } from '../segmentation/boundary-reconciliation.service';
 
 const clipSelect = {
   id: true,
@@ -17,6 +20,7 @@ const clipSelect = {
   title: true,
   startSec: true,
   endSec: true,
+  source: true,
   createdAt: true,
   updatedAt: true,
 } as const;
@@ -34,6 +38,7 @@ export interface ClipRecord {
   title: string;
   startSec: number;
   endSec: number;
+  source: 'MANUAL' | 'AI';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -87,6 +92,36 @@ export class ClipsService {
     });
   }
 
+  async createAiSuggestions(
+    userId: string,
+    videoId: string,
+    segments: ReconciledTopicSegment[],
+  ): Promise<ClipRecord[]> {
+    const video = await this.getReadyVideo(userId, videoId);
+    if (segments.length === 0) {
+      throw new BadRequestException('AI did not return any clip suggestions');
+    }
+
+    for (const segment of segments) {
+      this.validateRange(segment.startSec, segment.endSec, video.durationSec);
+    }
+
+    return this.prisma.$transaction(async (transaction) => {
+      const clips = await transaction.clip.createManyAndReturn({
+        data: segments.map((segment) => ({
+          videoId: video.id,
+          title: segment.title,
+          startSec: segment.startSec,
+          endSec: segment.endSec,
+          source: 'AI' as const,
+        })),
+        select: clipSelect,
+      });
+      await this.recordClipUsage(userId, segments.length, transaction);
+      return clips.sort((left, right) => left.startSec - right.startSec);
+    });
+  }
+
   async update(
     userId: string,
     clipId: string,
@@ -128,8 +163,88 @@ export class ClipsService {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.startSec !== undefined && { startSec: dto.startSec }),
         ...(dto.endSec !== undefined && { endSec: dto.endSec }),
+        source: 'MANUAL',
       },
       select: clipSelect,
+    });
+  }
+
+  async split(
+    userId: string,
+    clipId: string,
+    dto: SplitClipDto,
+  ): Promise<ClipRecord[]> {
+    const clip = await this.getOwnedEditableClip(userId, clipId);
+    this.ensureVideoReady(clip.video);
+    this.validateRange(clip.startSec, dto.splitSec, clip.video.durationSec);
+    this.validateRange(dto.splitSec, clip.endSec, clip.video.durationSec);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const first = await transaction.clip.update({
+        where: { id: clip.id },
+        data: {
+          title: `${clip.title} (Part 1)`,
+          endSec: dto.splitSec,
+          source: 'MANUAL',
+        },
+        select: clipSelect,
+      });
+      const second = await transaction.clip.create({
+        data: {
+          videoId: clip.video.id,
+          title: `${clip.title} (Part 2)`,
+          startSec: dto.splitSec,
+          endSec: clip.endSec,
+          source: 'MANUAL',
+        },
+        select: clipSelect,
+      });
+      await this.recordClipUsage(userId, 1, transaction);
+      return [first, second];
+    });
+  }
+
+  async merge(
+    userId: string,
+    videoId: string,
+    dto: MergeClipsDto,
+  ): Promise<ClipRecord> {
+    const uniqueIds = [...new Set(dto.clipIds)];
+    if (uniqueIds.length < 2) {
+      throw new BadRequestException(
+        'Select at least two different clips to merge',
+      );
+    }
+
+    const video = await this.getReadyVideo(userId, videoId);
+    const clips = await Promise.all(
+      uniqueIds.map((clipId) => this.getOwnedEditableClip(userId, clipId)),
+    );
+    if (clips.some((clip) => clip.video.id !== video.id)) {
+      throw new BadRequestException(
+        'All clips must belong to the selected video',
+      );
+    }
+
+    const ordered = clips
+      .slice()
+      .sort((left, right) => left.startSec - right.startSec);
+    const startSec = ordered[0].startSec;
+    const endSec = ordered.at(-1)!.endSec;
+    this.validateRange(startSec, endSec, video.durationSec);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const merged = await transaction.clip.update({
+        where: { id: ordered[0].id },
+        data: { title: dto.title, startSec, endSec, source: 'MANUAL' },
+        select: clipSelect,
+      });
+      await Promise.all(
+        ordered
+          .slice(1)
+          .map((clip) => transaction.clip.delete({ where: { id: clip.id } })),
+      );
+      return merged;
     });
   }
 
@@ -200,6 +315,23 @@ export class ClipsService {
     return { ...clip, video: { ...clip.video, cloudinaryId: publicId } };
   }
 
+  private async getOwnedEditableClip(userId: string, clipId: string) {
+    const clip = await this.prisma.clip.findFirst({
+      where: { id: clipId, video: { is: { userId } } },
+      select: {
+        id: true,
+        title: true,
+        startSec: true,
+        endSec: true,
+        video: { select: { id: true, status: true, durationSec: true } },
+      },
+    });
+    if (!clip) {
+      throw new NotFoundException('Clip was not found');
+    }
+    return clip;
+  }
+
   private ensureVideoReady(video: {
     status: string;
     durationSec: number | null;
@@ -238,15 +370,19 @@ export class ClipsService {
     }
   }
 
-  private async recordClipUsage(userId: string): Promise<void> {
+  private async recordClipUsage(
+    userId: string,
+    clipCount = 1,
+    client: Pick<PrismaService, 'usageRecord'> = this.prisma,
+  ): Promise<void> {
     const now = new Date();
     const monthStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
     );
-    await this.prisma.usageRecord.upsert({
+    await client.usageRecord.upsert({
       where: { userId_monthStart: { userId, monthStart } },
-      create: { userId, monthStart, uploadedSeconds: 0, clipCount: 1 },
-      update: { clipCount: { increment: 1 } },
+      create: { userId, monthStart, uploadedSeconds: 0, clipCount },
+      update: { clipCount: { increment: clipCount } },
     });
   }
 }

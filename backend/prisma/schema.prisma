@@ -14,6 +14,11 @@ enum VideoStatus {
   FAILED
 }
 
+enum ClipSource {
+  MANUAL
+  AI
+}
+
 enum ProcessingJobStatus {
   PENDING
   RUNNING
@@ -67,14 +72,15 @@ model Video {
 }
 
 model Clip {
-  id        String   @id @default(cuid())
+  id        String     @id @default(cuid())
   videoId   String
   title     String
   startSec  Float
   endSec    Float
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  source    ClipSource @default(MANUAL)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  video     Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
 
   @@index([videoId])
 }

@@ -211,6 +211,7 @@ describe('api', () => {
       title: 'Key takeaway',
       startSec: 10,
       endSec: 30,
+      source: 'MANUAL',
       createdAt: '2026-09-28T10:00:00.000Z',
       updatedAt: '2026-09-28T10:00:00.000Z',
     };
@@ -237,6 +238,28 @@ describe('api', () => {
     );
   });
 
+  it('requests the full AI suggestion set through the authenticated API', async () => {
+    const clips = [
+      {
+        id: 'clip-1',
+        videoId: 'video-1',
+        title: 'Suggested topic',
+        startSec: 0,
+        endSec: 30,
+        source: 'AI',
+        createdAt: '2026-09-28T10:00:00.000Z',
+        updatedAt: '2026-09-28T10:00:00.000Z',
+      },
+    ];
+    fetchMock.mockResolvedValue(response(clips, 201));
+
+    await expect(api.createAiClips('video-1')).resolves.toEqual(clips);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/videos\/video-1\/ai-clips$/),
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    );
+  });
+
   it('updates, deletes and gets a download URL for a clip', async () => {
     const clip = {
       id: 'clip-1',
@@ -244,6 +267,7 @@ describe('api', () => {
       title: 'Updated takeaway',
       startSec: 10,
       endSec: 35,
+      source: 'MANUAL',
       createdAt: '2026-09-28T10:00:00.000Z',
       updatedAt: '2026-09-28T10:05:00.000Z',
     };

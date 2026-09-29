@@ -265,18 +265,23 @@ export class TranscriptionService {
           continue;
         }
 
+        const text = seg.text?.trim() ?? '';
+        if (text.length === 0 || absoluteEnd <= absoluteStart) {
+          continue;
+        }
+
         // Deduplicate: skip if this segment already exists in merged (overlap region)
         const isDuplicate = merged.some(
           (m) =>
             Math.abs(m.startSec - absoluteStart) < 0.5 &&
-            m.text.trim() === seg.text.trim(),
+            m.text.trim() === text,
         );
 
         if (!isDuplicate) {
           merged.push({
             startSec: absoluteStart,
             endSec: absoluteEnd,
-            text: seg.text.trim(),
+            text,
           });
         }
       }

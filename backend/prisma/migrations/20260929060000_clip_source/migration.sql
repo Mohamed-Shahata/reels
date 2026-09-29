@@ -1,0 +1,4 @@
+CREATE TYPE "ClipSource" AS ENUM ('MANUAL', 'AI');
+
+ALTER TABLE "Clip"
+ADD COLUMN "source" "ClipSource" NOT NULL DEFAULT 'MANUAL';

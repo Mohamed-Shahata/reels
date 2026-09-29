@@ -30,6 +30,7 @@ export interface StoredClip {
   title: string;
   startSec: number;
   endSec: number;
+  source: 'MANUAL' | 'AI';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,19 +45,39 @@ export interface StoredUsageRecord {
   updatedAt: Date;
 }
 
+export interface StoredProcessingJob {
+  id: string;
+  userId: string;
+  videoId?: string;
+  type: 'TRANSCRIPTION';
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  bullJobId?: string;
+  progress: number;
+  attempts: number;
+  lastError: string | null;
+  payload?: unknown;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  failedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export function createPrismaFake() {
   const store: StoredUser[] = [];
   const sessions: StoredSession[] = [];
   const videos: StoredVideo[] = [];
   const clips: StoredClip[] = [];
   const usageRecords: StoredUsageRecord[] = [];
+  const processingJobs: StoredProcessingJob[] = [];
 
-  return {
+  const fake = {
     store,
     sessions,
     videos,
     clips,
     usageRecords,
+    processingJobs,
     $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     $connect: jest.fn(),
     $disconnect: jest.fn(),
@@ -329,12 +350,14 @@ export function createPrismaFake() {
           data,
           select,
         }: {
-          data: Pick<StoredClip, 'videoId' | 'title' | 'startSec' | 'endSec'>;
+          data: Pick<StoredClip, 'videoId' | 'title' | 'startSec' | 'endSec'> &
+            Partial<Pick<StoredClip, 'source'>>;
           select: Record<string, boolean>;
         }) => {
           const now = new Date();
           const clip: StoredClip = {
             id: `clip-${clips.length + 1}`,
+            source: 'MANUAL',
             createdAt: now,
             updatedAt: now,
             ...data,
@@ -407,7 +430,9 @@ export function createPrismaFake() {
           select,
         }: {
           where: { id: string };
-          data: Partial<Pick<StoredClip, 'title' | 'startSec' | 'endSec'>>;
+          data: Partial<
+            Pick<StoredClip, 'title' | 'startSec' | 'endSec' | 'source'>
+          >;
           select: Record<string, boolean>;
         }) => {
           const clip = clips.find((item) => item.id === where.id);
@@ -490,5 +515,98 @@ export function createPrismaFake() {
         },
       ),
     },
+    processingJob: {
+      create: jest.fn(
+        ({
+          data,
+        }: {
+          data: Pick<StoredProcessingJob, 'userId' | 'videoId' | 'type'> &
+            Partial<StoredProcessingJob>;
+        }) => {
+          const now = new Date();
+          const job: StoredProcessingJob = {
+            id: `job-${processingJobs.length + 1}`,
+            status: 'PENDING',
+            progress: 0,
+            attempts: 0,
+            lastError: null,
+            startedAt: null,
+            completedAt: null,
+            failedAt: null,
+            createdAt: now,
+            updatedAt: now,
+            ...data,
+          };
+          processingJobs.push(job);
+          return Promise.resolve(job);
+        },
+      ),
+      findUnique: jest.fn(({ where }: { where: { id: string } }) =>
+        Promise.resolve(
+          processingJobs.find((job) => job.id === where.id) ?? null,
+        ),
+      ),
+      findMany: jest.fn(
+        ({
+          where,
+          select,
+        }: {
+          where?: {
+            videoId?: string;
+            status?: { in: StoredProcessingJob['status'][] };
+          };
+          orderBy?: { createdAt: 'asc' | 'desc' };
+          select?: Record<string, boolean>;
+        }) =>
+          Promise.resolve(
+            processingJobs
+              .filter(
+                (job) =>
+                  (where?.videoId === undefined ||
+                    job.videoId === where.videoId) &&
+                  (where?.status === undefined ||
+                    where.status.in.includes(job.status)),
+              )
+              .slice()
+              .sort(
+                (left, right) =>
+                  left.createdAt.getTime() - right.createdAt.getTime(),
+              )
+              .map((job) =>
+                select
+                  ? Object.fromEntries(
+                      Object.entries(job).filter(([key]) => select[key]),
+                    )
+                  : job,
+              ),
+          ),
+      ),
+      update: jest.fn(
+        ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: Partial<StoredProcessingJob> & {
+            attempts?: { increment: number };
+          };
+        }) => {
+          const job = processingJobs.find((item) => item.id === where.id);
+          if (!job) throw new Error('Processing job not found');
+          const { attempts, ...fields } = data;
+          Object.assign(job, fields, {
+            attempts: job.attempts + (attempts?.increment ?? 0),
+            updatedAt: new Date(),
+          });
+          return Promise.resolve(job);
+        },
+      ),
+    },
   };
+
+  return Object.assign(fake, {
+    $transaction: jest.fn(<T>(callback: (client: typeof fake) => Promise<T>) =>
+      callback(fake),
+    ),
+  });
 }

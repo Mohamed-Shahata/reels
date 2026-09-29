@@ -14,6 +14,7 @@ export class PrismaService
       adapter: new PrismaPg({
         connectionString: config.get('DATABASE_URL', { infer: true }),
       }),
+      transactionOptions: { maxWait: 10_000, timeout: 20_000 },
     });
   }
 

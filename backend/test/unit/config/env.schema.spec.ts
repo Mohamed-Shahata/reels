@@ -23,6 +23,12 @@ describe('validateEnv', () => {
     expect(env.AUTH_RATE_LIMIT_TTL_SEC).toBe(60);
     expect(env.AUTH_RATE_LIMIT_MAX).toBe(10);
     expect(env.CLOUDINARY_UPLOAD_FOLDER).toBe('podcast-reels');
+    expect(env.GROQ_SEGMENTATION_MODEL).toBe('openai/gpt-oss-20b');
+    expect(env.SEGMENTATION_WINDOW_MAX_CHARS).toBe(6000);
+    expect(env.SEGMENTATION_WINDOW_OVERLAP_SEC).toBe(30);
+    expect(env.SEGMENTATION_MAX_COMPLETION_TOKENS).toBe(3000);
+    expect(env.SEGMENTATION_CONCURRENCY).toBe(1);
+    expect(env.SEGMENTATION_VALIDATION_MAX_ATTEMPTS).toBe(3);
     expect(env.VIDEO_ALLOWED_FORMATS).toEqual(['mp4', 'mov', 'webm']);
     expect(env.VIDEO_MAX_SIZE_BYTES).toBe(5 * 1024 * 1024 * 1024);
     expect(env.VIDEO_MAX_DURATION_SEC).toBe(4 * 60 * 60);
@@ -84,6 +90,12 @@ describe('validateEnv', () => {
     expect(() =>
       validateEnv({ ...validEnv, VIDEO_MAX_DURATION_SEC: '0' }),
     ).toThrow(/VIDEO_MAX_DURATION_SEC/);
+    expect(() =>
+      validateEnv({ ...validEnv, SEGMENTATION_WINDOW_MAX_CHARS: '999' }),
+    ).toThrow(/SEGMENTATION_WINDOW_MAX_CHARS/);
+    expect(() =>
+      validateEnv({ ...validEnv, SEGMENTATION_VALIDATION_MAX_ATTEMPTS: '0' }),
+    ).toThrow(/SEGMENTATION_VALIDATION_MAX_ATTEMPTS/);
     expect(() =>
       validateEnv({
         ...validEnv,

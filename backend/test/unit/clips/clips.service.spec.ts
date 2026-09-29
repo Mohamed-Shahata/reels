@@ -107,6 +107,72 @@ describe('ClipsService.create', () => {
     ).rejects.toBeInstanceOf(ConflictException);
     expect(clip.create).not.toHaveBeenCalled();
   });
+
+  it('creates validated AI suggestions with the AI source', async () => {
+    const video = { findFirst: jest.fn().mockResolvedValue(readyVideo) };
+    const record = (
+      id: string,
+      title: string,
+      startSec: number,
+      endSec: number,
+    ) => ({
+      id,
+      videoId: 'video-1',
+      title,
+      startSec,
+      endSec,
+      source: 'AI' as const,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const clip = {
+      createManyAndReturn: jest
+        .fn()
+        .mockResolvedValue([
+          record('clip-2', 'Conclusion', 30, 60),
+          record('clip-1', 'Introduction', 0, 30),
+        ]),
+    };
+    const usageRecord = { upsert: jest.fn().mockResolvedValue(undefined) };
+    const transaction = { clip, usageRecord };
+    const service = new ClipsService(
+      {
+        video,
+        clip,
+        usageRecord,
+        $transaction: jest.fn(
+          (callback: (client: typeof transaction) => Promise<unknown>) =>
+            callback(transaction),
+        ),
+      } as unknown as PrismaService,
+      {
+        get: (key: 'CLIP_MIN_DURATION_SEC' | 'CLIP_MAX_DURATION_SEC') =>
+          key === 'CLIP_MIN_DURATION_SEC' ? 5 : 180,
+      } as ConfigService<Env, true>,
+      {} as StorageService,
+    );
+
+    await expect(
+      service.createAiSuggestions('user-1', 'video-1', [
+        { title: 'Introduction', startSec: 0, endSec: 30, summary: 'Start.' },
+        { title: 'Conclusion', startSec: 30, endSec: 60, summary: 'End.' },
+      ]),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: 'clip-1', source: 'AI' }),
+      expect.objectContaining({ id: 'clip-2', source: 'AI' }),
+    ]);
+    expect(clip.createManyAndReturn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({ source: 'AI' }),
+          expect.objectContaining({ source: 'AI' }),
+        ],
+      }),
+    );
+    expect(usageRecord.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ update: { clipCount: { increment: 2 } } }),
+    );
+  });
 });
 
 describe('ClipsService ownership and updates', () => {

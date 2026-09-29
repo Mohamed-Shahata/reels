@@ -34,6 +34,24 @@ export const envSchema = z
     CLOUDINARY_UPLOAD_PRESET: nonEmpty.optional(),
     CLOUDINARY_UPLOAD_FOLDER: nonEmpty.default('podcast-reels'),
     GROQ_API_KEY: nonEmpty,
+    GROQ_SEGMENTATION_MODEL: nonEmpty.default('openai/gpt-oss-20b'),
+    SEGMENTATION_WINDOW_MAX_CHARS: z.coerce
+      .number()
+      .int()
+      .min(1000)
+      .default(6000),
+    SEGMENTATION_WINDOW_OVERLAP_SEC: z.coerce.number().min(0).default(30),
+    SEGMENTATION_MAX_COMPLETION_TOKENS: z.coerce
+      .number()
+      .int()
+      .min(1024)
+      .default(3000),
+    SEGMENTATION_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(1),
+    SEGMENTATION_VALIDATION_MAX_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .default(3),
     VIDEO_ALLOWED_FORMATS: nonEmpty
       .default('mp4,mov,webm')
       .transform((value) =>

@@ -66,6 +66,7 @@ const clipSchema = z.object({
   title: z.string(),
   startSec: z.number().min(0),
   endSec: z.number().positive(),
+  source: z.enum(['MANUAL', 'AI']),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -229,6 +230,20 @@ export const api = {
     input: { title: string; startSec: number; endSec: number },
   ) =>
     request(`/videos/${videoId}/clips`, clipSchema, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  createAiClips: (videoId: string) =>
+    request(`/videos/${videoId}/ai-clips`, clipsSchema, {
+      method: 'POST',
+    }),
+  splitClip: (clipId: string, splitSec: number) =>
+    request(`/clips/${clipId}/split`, clipsSchema, {
+      method: 'POST',
+      body: JSON.stringify({ splitSec }),
+    }),
+  mergeClips: (videoId: string, input: { clipIds: string[]; title: string }) =>
+    request(`/videos/${videoId}/clips/merge`, clipSchema, {
       method: 'POST',
       body: JSON.stringify(input),
     }),

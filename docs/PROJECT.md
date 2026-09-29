@@ -544,29 +544,57 @@ Acceptance: transcript and video stay in sync.
 Design the prompt and a strict JSON output schema (`title`, `startSec`, `endSec`, `summary`).
 Acceptance: documented prompt with example inputs and outputs.
 
+#### 6.1 Implementation result (2026-09-29)
+
+`docs/AI_SEGMENTATION_PROMPT.md` defines the system prompt, transcript-window input contract and a strict JSON response schema with `title`, `startSec`, `endSec` and `summary`. It also defines timestamp and language rules plus an Arabic example input and valid output. Runtime validation and window reconciliation remain the responsibilities of Tasks 6.2 through 6.4.
+
 **6.2 Transcript windowing**
 Split long transcripts into overlapping windows that fit within Groq token limits.
 Acceptance: a one-hour transcript is processed within the free tier limits.
+
+#### 6.2 Implementation result (2026-09-29)
+
+`TranscriptWindowingService` groups ordered transcript segments into character-bounded windows, carrying up to 30 seconds of earlier context when it fits. The default 12,000-character budget estimates at most 6,000 tokens conservatively, and can be changed through `SEGMENTATION_WINDOW_MAX_CHARS` and `SEGMENTATION_WINDOW_OVERLAP_SEC`. Unit coverage constructs a 3,600-second transcript and verifies that every source segment is represented without any window exceeding the configured budget.
 
 **6.3 Boundary reconciliation**
 Merge window results into one ordered list of contiguous segments covering the whole video with no gaps and no overlaps.
 Acceptance: the first segment starts at 0 and the last ends at video duration.
 
+#### 6.3 Implementation result (2026-09-29)
+
+`BoundaryReconciliationService` merges duplicate topic candidates returned from adjacent overlapping windows, orders the remaining candidates and calculates shared midpoint boundaries. Its output covers the entire video contiguously: the first topic starts at `0`, every subsequent topic starts exactly when the previous one ends, and the last topic ends at the video duration. Unit tests cover overlap, gaps, duplicate windows and invalid candidates.
+
 **6.4 Validation layer**
 Validate AI output with a schema, enforce minimum and maximum clip length, split oversized topics, merge tiny ones. If the output is invalid, retry the request.
 Acceptance: invalid AI output never reaches the database.
+
+#### 6.4 Implementation result (2026-09-29)
+
+`TopicSegmentValidationService` accepts only the strict response contract defined in Task 6.1, rejects extra fields and non-contiguous output, merges topics shorter than the configured clip minimum and splits topics above the configured maximum. `requestValidSegments` retries an AI provider response up to `SEGMENTATION_VALIDATION_MAX_ATTEMPTS` times, returning only validated segments. Database persistence is not connected to AI suggestions until Task 6.6, so invalid output has no persistence path.
 
 **6.5 Boundary snapping**
 Snap boundaries to the nearest sentence end from the transcript.
 Acceptance: clips never start or end in the middle of a sentence.
 
+#### 6.5 Implementation result (2026-09-29)
+
+`BoundarySnappingService` moves each shared internal topic boundary to the nearest timestamped transcript sentence end, recognizing Arabic and English sentence punctuation. If a transcript has no punctuation markers, it falls back to its timestamped segment endings. The first and last video boundaries remain fixed, and every snapped result remains contiguous. Unit tests cover punctuation, fallback behavior and invalid input coverage.
+
 **6.6 AI clip creation**
 Create clips with `source = AI` from the validated segments.
 Acceptance: the user gets a full set of suggested clips after one action.
 
+#### 6.6 Implementation result (2026-09-29)
+
+`POST /api/v1/videos/:videoId/ai-clips` runs the windowed Groq topic pipeline only for an owned ready video with a completed transcript. It validates schema and duration rules before persistence, snaps and validates boundaries once more, then creates the full set of clips as `source = AI`. The workspace exposes this as one `Create AI clips` action beside the transcript and immediately adds the resulting clips to the timeline. Manual clip creation remains unchanged.
+
 **6.7 Manual override**
 The user can edit start and end of any AI clip, add clips, merge clips, split clips, and delete clips. Manual clipping from Phase 3 continues to work unchanged.
 Acceptance: edits persist and are never overwritten by re-running AI unless the user confirms.
+
+#### 6.7 Implementation result (2026-09-29)
+
+Manual clip creation, editing and deletion continue to use the original endpoints. Editing an AI suggestion changes its source to `MANUAL`, making the override explicit. `POST /api/v1/clips/:id/split` creates two valid manual clips at the chosen point; `POST /api/v1/videos/:videoId/clips/merge` combines selected owned clips in a transaction. The workspace adds a split action at the player position and checkbox-based merge selection. AI re-runs currently add a new suggestion set rather than replacing existing clips, so they cannot overwrite manual edits; explicit re-run confirmation and usage limits remain Task 6.8.
 
 **6.8 Re-run and cost control**
 Allow re-running segmentation, with usage limits and stored results.
@@ -705,6 +733,13 @@ Backend (`backend/.env`):
 | `CLOUDINARY_API_SECRET` | yes | Cloudinary API secret (server only) |
 | `CLOUDINARY_UPLOAD_PRESET` | no | Optional upload preset name; when set it is included in the signature |
 | `CLOUDINARY_UPLOAD_FOLDER` | no | Folder for uploaded videos (default `podcast-reels`) |
+| `GROQ_API_KEY` | yes | Groq API key for transcription and future topic segmentation |
+| `GROQ_SEGMENTATION_MODEL` | no | Groq structured-output model for topic segmentation (default `openai/gpt-oss-20b`) |
+| `SEGMENTATION_WINDOW_MAX_CHARS` | no | Maximum transcript characters sent in one topic-analysis window (default `12000`) |
+| `SEGMENTATION_WINDOW_OVERLAP_SEC` | no | Earlier transcript context retained between topic-analysis windows in seconds (default `30`) |
+| `SEGMENTATION_MAX_COMPLETION_TOKENS` | no | Completion token cap for each topic-analysis request; keeps reasoning models from exhausting the output budget (default `3000`) |
+| `SEGMENTATION_CONCURRENCY` | no | Number of transcript windows analysed in parallel; keep at `1` on low Groq rate-limit tiers (default `1`) |
+| `SEGMENTATION_VALIDATION_MAX_ATTEMPTS` | no | Number of invalid topic-analysis responses retried before failing (default `3`) |
 | `VIDEO_ALLOWED_FORMATS` | no | Comma-separated extensions allowed for video uploads (default `mp4,mov,webm`) |
 | `VIDEO_MAX_SIZE_BYTES` | no | Largest accepted video file in bytes (default `5368709120`, 5 GiB) |
 | `VIDEO_MAX_DURATION_SEC` | no | Longest accepted video duration in seconds (default `14400`, 4 hours) |

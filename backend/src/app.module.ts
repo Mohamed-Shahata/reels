@@ -7,6 +7,7 @@ import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
 import { ProcessingModule } from './processing/processing.module';
+import { SegmentationModule } from './segmentation/segmentation.module';
 import { UsageModule } from './usage/usage.module';
 import { VideosModule } from './videos/videos.module';
 
@@ -21,6 +22,7 @@ import { VideosModule } from './videos/videos.module';
     ClipsModule,
     UsageModule,
     ProcessingModule.register(),
+    SegmentationModule,
   ],
 })
 export class AppModule implements NestModule {
