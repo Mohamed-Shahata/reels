@@ -9,3 +9,4 @@ process.env.CLOUDINARY_API_SECRET = 'test-secret';
 process.env.JWT_ACCESS_SECRET = 'test-access-secret-at-least-32-characters';
 process.env.AUTH_RATE_LIMIT_TTL_SEC = '60';
 process.env.AUTH_RATE_LIMIT_MAX = '1000';
+process.env.GROQ_API_KEY = 'test-groq-key';
