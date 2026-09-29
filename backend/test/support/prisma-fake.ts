@@ -370,6 +370,36 @@ export function createPrismaFake() {
           );
         },
       ),
+      createManyAndReturn: jest.fn(
+        ({
+          data,
+          select,
+        }: {
+          data: (Pick<StoredClip, 'videoId' | 'title' | 'startSec' | 'endSec'> &
+            Partial<Pick<StoredClip, 'source'>>)[];
+          select: Record<string, boolean>;
+        }) => {
+          const now = new Date();
+          const created = data.map((item) => {
+            const clip: StoredClip = {
+              id: `clip-${clips.length + 1}`,
+              source: 'MANUAL',
+              createdAt: now,
+              updatedAt: now,
+              ...item,
+            };
+            clips.push(clip);
+            return clip;
+          });
+          return Promise.resolve(
+            created.map((clip) =>
+              Object.fromEntries(
+                Object.entries(clip).filter(([key]) => select[key]),
+              ),
+            ),
+          );
+        },
+      ),
       findMany: jest.fn(
         ({
           where,
