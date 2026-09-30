@@ -73,6 +73,25 @@ export class TopicSegmentationService {
     this.concurrency = config.get('SEGMENTATION_CONCURRENCY', { infer: true });
   }
 
+  async assertReady(userId: string, videoId: string): Promise<void> {
+    const video = await this.prisma.video.findFirst({
+      where: { id: videoId, userId, status: 'READY' },
+      select: { id: true, durationSec: true },
+    });
+    if (!video?.durationSec) {
+      throw new NotFoundException('Video was not found or is not ready');
+    }
+
+    const segmentCount = await this.prisma.transcriptSegment.count({
+      where: { transcript: { is: { videoId: video.id } } },
+    });
+    if (segmentCount === 0) {
+      throw new ConflictException(
+        'Transcript must be ready before generating AI clips',
+      );
+    }
+  }
+
   async suggest(userId: string, videoId: string) {
     const video = await this.prisma.video.findFirst({
       where: { id: videoId, userId, status: 'READY' },

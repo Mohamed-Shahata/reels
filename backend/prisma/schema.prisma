@@ -28,6 +28,7 @@ enum ProcessingJobStatus {
 
 enum ProcessingJobType {
   TRANSCRIPTION
+  RENDER
 }
 
 model User {
@@ -40,6 +41,7 @@ model User {
   sessions     Session[]
   usageRecords UsageRecord[]
   processingJobs ProcessingJob[]
+  segmentationRuns SegmentationRun[]
 }
 
 model Session {
@@ -67,6 +69,7 @@ model Video {
   clips        Clip[]
   processingJobs ProcessingJob[]
   transcript   Transcript?
+  segmentationRuns SegmentationRun[]
 
   @@index([userId])
 }
@@ -81,6 +84,7 @@ model Clip {
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   video     Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  renders   ClipRender[]
 
   @@index([videoId])
 }
@@ -91,6 +95,7 @@ model UsageRecord {
   monthStart      DateTime
   uploadedSeconds Float    @default(0)
   clipCount       Int      @default(0)
+  aiRunCount      Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -117,6 +122,7 @@ model ProcessingJob {
   updatedAt   DateTime            @updatedAt
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   video       Video?              @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  clipRender  ClipRender?
 
   @@index([userId, status])
   @@index([videoId])
@@ -139,8 +145,43 @@ model TranscriptSegment {
   startSec     Float
   endSec       Float
   text         String
+  words        Json?
   createdAt    DateTime   @default(now())
   transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
 
   @@index([transcriptId, startSec])
+}
+
+model SegmentationRun {
+  id                String   @id @default(cuid())
+  userId            String
+  videoId           String
+  clipCount         Int
+  replacedClipCount Int      @default(0)
+  segments          Json
+  createdAt         DateTime @default(now())
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video             Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@index([videoId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model ClipRender {
+  id              String         @id @default(cuid())
+  clipId          String
+  processingJobId String?        @unique
+  startSec        Float
+  endSec          Float
+  outputUrl       String?
+  subtitleStyle   Json?
+  subtitleCues    Json?
+  subtitleEdits   Json?
+  subtitleKey     String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  clip            Clip           @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  processingJob   ProcessingJob? @relation(fields: [processingJobId], references: [id], onDelete: Cascade)
+
+  @@index([clipId, createdAt])
 }

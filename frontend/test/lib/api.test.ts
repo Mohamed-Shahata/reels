@@ -256,7 +256,61 @@ describe('api', () => {
     await expect(api.createAiClips('video-1')).resolves.toEqual(clips);
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringMatching(/\/videos\/video-1\/ai-clips$/),
-      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: '{}',
+      }),
+    );
+  });
+
+  it('sends the replacement confirmation when re-running AI clips', async () => {
+    fetchMock.mockResolvedValue(response([], 201));
+
+    await api.createAiClips('video-1', { confirmReplace: true });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/videos\/video-1\/ai-clips$/),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ confirmReplace: true }),
+      }),
+    );
+  });
+
+  it('surfaces the monthly AI run limit as an API error', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          statusCode: 429,
+          message: 'Monthly AI run limit of 20 has been reached',
+        },
+        429,
+        'req-9',
+      ),
+    );
+
+    await expect(api.createAiClips('video-1')).rejects.toMatchObject({
+      status: 429,
+      message: 'Monthly AI run limit of 20 has been reached',
+      requestId: 'req-9',
+    });
+  });
+
+  it('loads the monthly usage including AI run counters', async () => {
+    const usage = {
+      month: '2026-09',
+      uploadedMinutes: 28,
+      clipCount: 4,
+      aiRuns: 3,
+      aiRunLimit: 20,
+    };
+    fetchMock.mockResolvedValue(response(usage));
+
+    await expect(api.getUsage()).resolves.toEqual(usage);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/usage$/),
+      expect.objectContaining({ credentials: 'include' }),
     );
   });
 
@@ -303,6 +357,257 @@ describe('api', () => {
     );
   });
 
+  it('requests reframed playback and download URLs only when asked', async () => {
+    fetchMock
+      .mockResolvedValueOnce(response({ url: 'https://playback.example' }))
+      .mockResolvedValueOnce(response({ url: 'https://reel.example' }))
+      .mockResolvedValueOnce(response({ url: 'https://download.example' }));
+
+    await api.getClipPlaybackUrl('clip-1');
+    await api.getClipPlaybackUrl('clip-1', { reframe: true });
+    await api.getClipDownloadUrl('clip-1', { reframe: true });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/\/clips\/clip-1\/playback$/),
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/\/clips\/clip-1\/playback\?reframe=true$/),
+      expect.anything(),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      expect.stringMatching(/\/clips\/clip-1\/download\?reframe=true$/),
+      expect.anything(),
+    );
+  });
+
+  it('starts, lists and retries 9:16 renders', async () => {
+    const render = {
+      id: 'render-1',
+      clipId: 'clip-1',
+      status: 'PENDING',
+      progress: 0,
+      attempts: 0,
+      error: null,
+      startSec: 10,
+      endSec: 35,
+      outputUrl: null,
+      subtitles: false,
+      subtitleStyle: null,
+      createdAt: '2026-09-29T10:00:00.000Z',
+      updatedAt: '2026-09-29T10:00:00.000Z',
+    };
+    fetchMock
+      .mockResolvedValueOnce(response(render, 202))
+      .mockResolvedValueOnce(response([render], 202))
+      .mockResolvedValueOnce(response([render]))
+      .mockResolvedValueOnce(response(render, 202));
+
+    await expect(api.renderClip('clip-1')).resolves.toEqual(render);
+    await expect(api.renderAllClips('video-1')).resolves.toEqual([render]);
+    await expect(api.getVideoRenders('video-1')).resolves.toEqual([render]);
+    await expect(api.retryRender('render-1')).resolves.toEqual(render);
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/\/clips\/clip-1\/renders$/),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/\/videos\/video-1\/renders$/),
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      expect.stringMatching(/\/videos\/video-1\/renders$/),
+      expect.objectContaining({ credentials: 'include' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      expect.stringMatching(/\/renders\/render-1\/retry$/),
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('sends the subtitle toggle and style with a render request', async () => {
+    const style = {
+      fontFamily: 'Cairo',
+      fontSizePx: 34,
+      bold: true,
+      textColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0.63,
+      position: 'BOTTOM',
+    } as const;
+    const render = {
+      id: 'render-2',
+      clipId: 'clip-1',
+      status: 'PENDING',
+      progress: 0,
+      attempts: 0,
+      error: null,
+      startSec: 10,
+      endSec: 35,
+      outputUrl: null,
+      subtitles: true,
+      subtitleStyle: style,
+      createdAt: '2026-09-29T10:00:00.000Z',
+      updatedAt: '2026-09-29T10:00:00.000Z',
+    };
+    fetchMock
+      .mockResolvedValueOnce(response(render, 202))
+      .mockResolvedValueOnce(response([render], 202))
+      .mockResolvedValueOnce(
+        response({ ...render, subtitles: false, subtitleStyle: null }, 202),
+      );
+
+    await expect(
+      api.renderClip('clip-1', { subtitles: true, presetId: 'REEL', style }),
+    ).resolves.toEqual(render);
+    await api.renderAllClips('video-1', {
+      subtitles: true,
+      presetId: 'REEL',
+      style,
+    });
+    await api.renderClip('clip-1', { subtitles: false, style });
+
+    const bodyOf = (call: number) =>
+      JSON.parse(
+        (fetchMock.mock.calls[call][1] as { body: string }).body,
+      ) as unknown;
+    expect(bodyOf(0)).toEqual({ subtitles: true, preset: 'REEL', ...style });
+    expect(bodyOf(1)).toEqual({ subtitles: true, preset: 'REEL', ...style });
+    expect(bodyOf(2)).toEqual({});
+  });
+
+  it('sends an empty body when no render options are given', async () => {
+    const render = {
+      id: 'render-1',
+      clipId: 'clip-1',
+      status: 'PENDING',
+      progress: 0,
+      attempts: 0,
+      error: null,
+      startSec: 10,
+      endSec: 35,
+      outputUrl: null,
+      subtitles: false,
+      subtitleStyle: null,
+      createdAt: '2026-09-29T10:00:00.000Z',
+      updatedAt: '2026-09-29T10:00:00.000Z',
+    };
+    fetchMock.mockResolvedValue(response(render, 202));
+
+    await api.renderClip('clip-1');
+
+    expect((fetchMock.mock.calls[0][1] as { body: string }).body).toBe('{}');
+  });
+
+  it('rejects a render response that does not say whether subtitles are burned in', async () => {
+    fetchMock.mockResolvedValue(
+      response(
+        {
+          id: 'render-1',
+          clipId: 'clip-1',
+          status: 'PENDING',
+          progress: 0,
+          attempts: 0,
+          error: null,
+          startSec: 10,
+          endSec: 35,
+          outputUrl: null,
+          createdAt: '2026-09-29T10:00:00.000Z',
+          updatedAt: '2026-09-29T10:00:00.000Z',
+        },
+        202,
+      ),
+    );
+
+    await expect(api.renderClip('clip-1')).rejects.toThrow();
+  });
+
+  it('loads the download URL of a specific render', async () => {
+    fetchMock.mockResolvedValue(
+      response({ url: 'https://res.cloudinary.com/demo/subtitled.mp4' }),
+    );
+
+    await expect(api.getRenderDownloadUrl('render-1')).resolves.toEqual({
+      url: 'https://res.cloudinary.com/demo/subtitled.mp4',
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/renders\/render-1\/download$/),
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
+  it('accepts render jobs in the processing job list', async () => {
+    const job = {
+      id: 'job-1',
+      type: 'RENDER',
+      status: 'RUNNING',
+      progress: 30,
+      lastError: null,
+      createdAt: '2026-09-29T10:00:00.000Z',
+      startedAt: '2026-09-29T10:00:01.000Z',
+      completedAt: null,
+      failedAt: null,
+    };
+    fetchMock.mockResolvedValue(response([job]));
+
+    await expect(api.getVideoProcessingJobs('video-1')).resolves.toEqual([job]);
+  });
+
+  it('loads the subtitle style catalog', async () => {
+    const catalog = {
+      defaultPresetId: 'REEL',
+      fonts: ['Cairo', 'Amiri', 'Arial'],
+      positions: ['TOP', 'MIDDLE', 'BOTTOM'],
+      fontSize: { min: 20, max: 72 },
+      presets: [
+        {
+          id: 'REEL',
+          label: 'Reel',
+          description: 'Bold white text on a dark box.',
+          style: {
+            fontFamily: 'Cairo',
+            fontSizePx: 34,
+            bold: true,
+            textColor: '#ffffff',
+            backgroundColor: '#000000',
+            backgroundOpacity: 0.63,
+            position: 'BOTTOM',
+          },
+        },
+      ],
+    };
+    fetchMock.mockResolvedValue(response(catalog));
+
+    await expect(api.getSubtitleStyleCatalog()).resolves.toEqual(catalog);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/subtitles\/styles$/),
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
+  it('rejects a subtitle style catalog with an unsupported font', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        defaultPresetId: 'REEL',
+        fonts: ['Tahoma'],
+        positions: ['TOP'],
+        fontSize: { min: 20, max: 72 },
+        presets: [],
+      }),
+    );
+
+    await expect(api.getSubtitleStyleCatalog()).rejects.toBeDefined();
+  });
+
   it('surfaces the API error message to the form layer', async () => {
     fetchMock.mockResolvedValue(
       response({ message: 'Invalid email or password' }, 401),
@@ -322,6 +627,120 @@ describe('api', () => {
       message: 'Upload was not found',
       requestId: 'req-upload-1',
       status: 404,
+    });
+  });
+
+  it('loads the subtitle cues of a clip', async () => {
+    const subtitles = {
+      clipId: 'clip-1',
+      language: 'ar',
+      startSec: 10,
+      endSec: 30,
+      durationSec: 20,
+      timing: 'WORD',
+      cues: [{ index: 1, startSec: 0.5, endSec: 2, text: 'Hello there' }],
+    };
+    fetchMock.mockResolvedValue(response(subtitles));
+
+    await expect(api.getClipSubtitles('clip-1')).resolves.toEqual(subtitles);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/clips\/clip-1\/subtitles$/),
+      expect.objectContaining({ credentials: 'include' }),
+    );
+  });
+
+  it('rejects subtitle cues with an unknown timing', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        clipId: 'clip-1',
+        language: 'ar',
+        startSec: 10,
+        endSec: 30,
+        durationSec: 20,
+        timing: 'GUESSED',
+        cues: [],
+      }),
+    );
+
+    await expect(api.getClipSubtitles('clip-1')).rejects.toThrow();
+  });
+
+  describe('subtitle edits in render requests', () => {
+    const style = {
+      fontFamily: 'Cairo',
+      fontSizePx: 34,
+      bold: true,
+      textColor: '#ffffff',
+      backgroundColor: '#000000',
+      backgroundOpacity: 0.63,
+      position: 'BOTTOM',
+    } as const;
+    const edits = [{ index: 2, text: 'Fixed line' }];
+    const render = {
+      id: 'render-3',
+      clipId: 'clip-1',
+      status: 'PENDING',
+      progress: 0,
+      attempts: 0,
+      error: null,
+      startSec: 10,
+      endSec: 35,
+      outputUrl: null,
+      subtitles: true,
+      subtitleStyle: style,
+      subtitleEdits: edits,
+      createdAt: '2026-09-29T10:00:00.000Z',
+      updatedAt: '2026-09-29T10:00:00.000Z',
+    };
+
+    const bodyOf = (call: number) =>
+      JSON.parse(
+        (fetchMock.mock.calls[call][1] as { body: string }).body,
+      ) as unknown;
+
+    it('sends the edits with a single clip render and reads them back', async () => {
+      fetchMock.mockResolvedValue(response(render, 202));
+
+      await expect(
+        api.renderClip('clip-1', {
+          subtitles: true,
+          presetId: 'REEL',
+          style,
+          edits,
+        }),
+      ).resolves.toEqual(render);
+
+      expect(bodyOf(0)).toEqual({
+        subtitles: true,
+        preset: 'REEL',
+        ...style,
+        subtitleEdits: edits,
+      });
+    });
+
+    it('sends no edit field when there are no edits', async () => {
+      fetchMock.mockResolvedValue(response(render, 202));
+
+      await api.renderClip('clip-1', { subtitles: true, style, edits: [] });
+
+      expect(bodyOf(0)).not.toHaveProperty('subtitleEdits');
+    });
+
+    it('never sends edits with the whole video render', async () => {
+      fetchMock.mockResolvedValue(response([render], 202));
+
+      await api.renderAllClips('video-1', { subtitles: true, style, edits });
+
+      expect(bodyOf(0)).not.toHaveProperty('subtitleEdits');
+    });
+
+    it('sends nothing but an empty body when subtitles are off', async () => {
+      fetchMock.mockResolvedValue(response(render, 202));
+
+      await api.renderClip('clip-1', { subtitles: false, edits });
+
+      expect(bodyOf(0)).toEqual({});
     });
   });
 });

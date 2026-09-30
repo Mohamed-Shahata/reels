@@ -41,8 +41,19 @@ export interface StoredUsageRecord {
   monthStart: Date;
   uploadedSeconds: number;
   clipCount: number;
+  aiRunCount: number;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface StoredSegmentationRun {
+  id: string;
+  userId: string;
+  videoId: string;
+  clipCount: number;
+  replacedClipCount: number;
+  segments: unknown;
+  createdAt: Date;
 }
 
 export interface StoredProcessingJob {
@@ -69,6 +80,7 @@ export function createPrismaFake() {
   const videos: StoredVideo[] = [];
   const clips: StoredClip[] = [];
   const usageRecords: StoredUsageRecord[] = [];
+  const segmentationRuns: StoredSegmentationRun[] = [];
   const processingJobs: StoredProcessingJob[] = [];
 
   const fake = {
@@ -77,6 +89,7 @@ export function createPrismaFake() {
     videos,
     clips,
     usageRecords,
+    segmentationRuns,
     processingJobs,
     $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     $connect: jest.fn(),
@@ -475,6 +488,34 @@ export function createPrismaFake() {
           );
         },
       ),
+      count: jest.fn(
+        ({ where }: { where: { videoId: string; source?: 'MANUAL' | 'AI' } }) =>
+          Promise.resolve(
+            clips.filter(
+              (clip) =>
+                clip.videoId === where.videoId &&
+                (where.source === undefined || clip.source === where.source),
+            ).length,
+          ),
+      ),
+      deleteMany: jest.fn(
+        ({
+          where,
+        }: {
+          where: { videoId: string; source?: 'MANUAL' | 'AI' };
+        }) => {
+          const kept = clips.filter(
+            (clip) =>
+              !(
+                clip.videoId === where.videoId &&
+                (where.source === undefined || clip.source === where.source)
+              ),
+          );
+          const count = clips.length - kept.length;
+          clips.splice(0, clips.length, ...kept);
+          return Promise.resolve({ count });
+        },
+      ),
       delete: jest.fn(({ where }: { where: { id: string } }) => {
         const index = clips.findIndex((item) => item.id === where.id);
         if (index === -1) throw new Error('Clip not found');
@@ -515,7 +556,8 @@ export function createPrismaFake() {
           create: Pick<
             StoredUsageRecord,
             'userId' | 'monthStart' | 'uploadedSeconds' | 'clipCount'
-          >;
+          > &
+            Partial<Pick<StoredUsageRecord, 'aiRunCount'>>;
           update: {
             uploadedSeconds?: { increment: number };
             clipCount?: { increment: number };
@@ -536,6 +578,7 @@ export function createPrismaFake() {
           const now = new Date();
           const created: StoredUsageRecord = {
             id: `usage-${usageRecords.length + 1}`,
+            aiRunCount: 0,
             createdAt: now,
             updatedAt: now,
             ...create,
@@ -543,6 +586,74 @@ export function createPrismaFake() {
           usageRecords.push(created);
           return Promise.resolve(created);
         },
+      ),
+      updateMany: jest.fn(
+        ({
+          where,
+          data,
+        }: {
+          where: {
+            userId: string;
+            monthStart: Date;
+            aiRunCount: { lt: number };
+          };
+          data: { aiRunCount: { increment: number } };
+        }) => {
+          const record = usageRecords.find(
+            (item) =>
+              item.userId === where.userId &&
+              item.monthStart.getTime() === where.monthStart.getTime() &&
+              item.aiRunCount < where.aiRunCount.lt,
+          );
+          if (record) {
+            record.aiRunCount += data.aiRunCount.increment;
+            record.updatedAt = new Date();
+          }
+          return Promise.resolve({ count: record ? 1 : 0 });
+        },
+      ),
+    },
+    segmentationRun: {
+      create: jest.fn(
+        ({
+          data,
+        }: {
+          data: Omit<StoredSegmentationRun, 'id' | 'createdAt'>;
+        }) => {
+          const run: StoredSegmentationRun = {
+            id: `run-${segmentationRuns.length + 1}`,
+            createdAt: new Date(),
+            ...data,
+          };
+          segmentationRuns.push(run);
+          return Promise.resolve(run);
+        },
+      ),
+      findMany: jest.fn(
+        ({
+          where,
+          take,
+          select,
+        }: {
+          where: { videoId: string; userId: string };
+          take: number;
+          select: Record<string, boolean>;
+        }) =>
+          Promise.resolve(
+            segmentationRuns
+              .filter(
+                (run) =>
+                  run.videoId === where.videoId && run.userId === where.userId,
+              )
+              .slice()
+              .reverse()
+              .slice(0, take)
+              .map((run) =>
+                Object.fromEntries(
+                  Object.entries(run).filter(([key]) => select[key]),
+                ),
+              ),
+          ),
       ),
     },
     processingJob: {

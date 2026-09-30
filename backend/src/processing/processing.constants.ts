@@ -6,7 +6,7 @@ export const PROCESSING_QUEUE = Symbol('PROCESSING_QUEUE');
 
 export interface ProcessingQueueJobPayload {
   processingJobId: string;
-  type: 'TRANSCRIPTION';
+  type: 'TRANSCRIPTION' | 'RENDER';
 }
 
 export interface ProcessingQueueClient {

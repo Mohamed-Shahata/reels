@@ -52,6 +52,9 @@ export const envSchema = z
       .int()
       .min(1)
       .default(3),
+    SEGMENTATION_MONTHLY_RUN_LIMIT: z.coerce.number().int().min(1).default(20),
+    RENDER_POLL_INTERVAL_MS: z.coerce.number().int().min(1).default(3000),
+    RENDER_TIMEOUT_MS: z.coerce.number().int().min(1).default(300000),
     VIDEO_ALLOWED_FORMATS: nonEmpty
       .default('mp4,mov,webm')
       .transform((value) =>

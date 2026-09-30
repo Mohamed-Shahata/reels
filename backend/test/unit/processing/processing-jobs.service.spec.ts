@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { ProcessingJob } from '../../../src/generated/prisma/client';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
 import type { ProcessingQueueClient } from '../../../src/processing/processing.constants';
@@ -114,4 +114,63 @@ describe('ProcessingJobsService', () => {
       NotFoundException,
     );
   });
+
+  it('resets a failed job and re-queues it for another attempt', async () => {
+    const failed = buildJob({
+      type: 'RENDER',
+      status: 'FAILED',
+      attempts: 1,
+      lastError: 'Timed out waiting for the reel to render',
+      failedAt: new Date('2026-09-28T00:01:00.000Z'),
+    });
+    const reset = buildJob({ type: 'RENDER', attempts: 1 });
+    const ensureQueued = jest.fn().mockResolvedValue(undefined);
+    const processingJob = {
+      findUnique: jest.fn().mockResolvedValue(failed),
+      update: jest.fn().mockResolvedValue(reset),
+    };
+    const service = new ProcessingJobsService(
+      { processingJob } as unknown as PrismaService,
+      { enqueue: jest.fn(), ensureQueued },
+    );
+
+    await expect(service.retryJob('job-1')).resolves.toEqual(reset);
+
+    expect(processingJob.update).toHaveBeenCalledWith({
+      where: { id: 'job-1' },
+      data: {
+        status: 'PENDING',
+        progress: 0,
+        lastError: null,
+        startedAt: null,
+        completedAt: null,
+        failedAt: null,
+      },
+    });
+    expect(ensureQueued).toHaveBeenCalledWith({
+      processingJobId: 'job-1',
+      type: 'RENDER',
+    });
+  });
+
+  it.each(['PENDING', 'RUNNING', 'COMPLETED'] as const)(
+    'refuses to retry a %s job',
+    async (status) => {
+      const ensureQueued = jest.fn();
+      const processingJob = {
+        findUnique: jest.fn().mockResolvedValue(buildJob({ status })),
+        update: jest.fn(),
+      };
+      const service = new ProcessingJobsService(
+        { processingJob } as unknown as PrismaService,
+        { enqueue: jest.fn(), ensureQueued },
+      );
+
+      await expect(service.retryJob('job-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(processingJob.update).not.toHaveBeenCalled();
+      expect(ensureQueued).not.toHaveBeenCalled();
+    },
+  );
 });

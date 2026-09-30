@@ -72,6 +72,14 @@ const clipSchema = z.object({
 });
 
 const clipsSchema = z.array(clipSchema);
+
+const usageSchema = z.object({
+  month: z.string(),
+  uploadedMinutes: z.number().min(0),
+  clipCount: z.number().int().min(0),
+  aiRuns: z.number().int().min(0),
+  aiRunLimit: z.number().int().positive(),
+});
 const clipUrlSchema = z.object({ url: z.url() });
 
 const processingJobStatusSchema = z.enum([
@@ -80,7 +88,7 @@ const processingJobStatusSchema = z.enum([
   'COMPLETED',
   'FAILED',
 ]);
-const processingJobTypeSchema = z.enum(['TRANSCRIPTION']);
+const processingJobTypeSchema = z.enum(['TRANSCRIPTION', 'RENDER']);
 
 const processingJobSchema = z.object({
   id: z.string(),
@@ -95,6 +103,59 @@ const processingJobSchema = z.object({
 });
 
 const processingJobsSchema = z.array(processingJobSchema);
+
+const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+export const subtitleStyleSchema = z.object({
+  fontFamily: z.enum(['Cairo', 'Amiri', 'Arial']),
+  fontSizePx: z.number().int().positive(),
+  bold: z.boolean(),
+  textColor: hexColorSchema,
+  backgroundColor: hexColorSchema,
+  backgroundOpacity: z.number().min(0).max(1),
+  position: z.enum(['TOP', 'MIDDLE', 'BOTTOM']),
+});
+
+const subtitleEditSchema = z.object({
+  index: z.number().int().min(1),
+  text: z.string(),
+});
+
+const subtitleCueSchema = z.object({
+  index: z.number().int().min(1),
+  startSec: z.number().min(0),
+  endSec: z.number().min(0),
+  text: z.string(),
+});
+
+const clipSubtitlesSchema = z.object({
+  clipId: z.string(),
+  language: z.string(),
+  startSec: z.number().min(0),
+  endSec: z.number().positive(),
+  durationSec: z.number().positive(),
+  timing: z.enum(['WORD', 'ESTIMATED', 'MIXED', 'NONE']),
+  cues: z.array(subtitleCueSchema),
+});
+
+const clipRenderSchema = z.object({
+  id: z.string(),
+  clipId: z.string(),
+  status: processingJobStatusSchema,
+  progress: z.number().min(0).max(100),
+  attempts: z.number().int().min(0),
+  error: z.string().nullable(),
+  startSec: z.number().min(0),
+  endSec: z.number().positive(),
+  outputUrl: z.string().nullable(),
+  subtitles: z.boolean(),
+  subtitleStyle: subtitleStyleSchema.nullable(),
+  subtitleEdits: z.array(subtitleEditSchema).optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const clipRendersSchema = z.array(clipRenderSchema);
 
 const transcriptSegmentSchema = z.object({
   id: z.string(),
@@ -112,6 +173,24 @@ const transcriptSchema = z
   })
   .nullable();
 
+const subtitleStylePresetSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string(),
+  style: subtitleStyleSchema,
+});
+
+const subtitleStyleCatalogSchema = z.object({
+  defaultPresetId: z.string().min(1),
+  fonts: z.array(subtitleStyleSchema.shape.fontFamily).min(1),
+  positions: z.array(subtitleStyleSchema.shape.position).min(1),
+  fontSize: z.object({
+    min: z.number().int().positive(),
+    max: z.number().int().positive(),
+  }),
+  presets: z.array(subtitleStylePresetSchema).min(1),
+});
+
 const errorSchema = z.object({
   message: z.union([z.string(), z.array(z.string())]).optional(),
   requestId: z.string().min(1).optional(),
@@ -122,9 +201,44 @@ export type CreateVideoUpload = z.infer<typeof createVideoSchema>;
 export type UploadConstraints = z.infer<typeof uploadConstraintsSchema>;
 export type LibraryVideo = z.infer<typeof libraryVideoSchema>;
 export type Clip = z.infer<typeof clipSchema>;
+export type Usage = z.infer<typeof usageSchema>;
 export type ProcessingJob = z.infer<typeof processingJobSchema>;
 export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
 export type Transcript = z.infer<typeof transcriptSchema>;
+export type ClipRender = z.infer<typeof clipRenderSchema>;
+export type SubtitleStyle = z.infer<typeof subtitleStyleSchema>;
+export type SubtitleEdit = z.infer<typeof subtitleEditSchema>;
+export type SubtitleCue = z.infer<typeof subtitleCueSchema>;
+export type ClipSubtitles = z.infer<typeof clipSubtitlesSchema>;
+export type SubtitleStylePreset = z.infer<typeof subtitleStylePresetSchema>;
+export type SubtitleStyleCatalog = z.infer<typeof subtitleStyleCatalogSchema>;
+
+export interface ClipUrlOptions {
+  reframe?: boolean;
+}
+
+export interface RenderRequestOptions {
+  subtitles: boolean;
+  presetId?: string;
+  style?: SubtitleStyle;
+  edits?: SubtitleEdit[];
+}
+
+function renderRequestBody(options: RenderRequestOptions): string {
+  if (!options.subtitles) return JSON.stringify({});
+
+  return JSON.stringify({
+    subtitles: true,
+    ...(options.presetId && { preset: options.presetId }),
+    ...options.style,
+    ...(options.edits?.length && { subtitleEdits: options.edits }),
+  });
+}
+
+function clipUrlPath(clipId: string, action: string, options: ClipUrlOptions) {
+  const query = options.reframe ? '?reframe=true' : '';
+  return `/clips/${clipId}/${action}${query}`;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -233,10 +347,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     }),
-  createAiClips: (videoId: string) =>
+  createAiClips: (
+    videoId: string,
+    options: { confirmReplace?: boolean } = {},
+  ) =>
     request(`/videos/${videoId}/ai-clips`, clipsSchema, {
       method: 'POST',
+      body: JSON.stringify(
+        options.confirmReplace ? { confirmReplace: true } : {},
+      ),
     }),
+  getUsage: () => request('/usage', usageSchema),
   splitClip: (clipId: string, splitSec: number) =>
     request(`/clips/${clipId}/split`, clipsSchema, {
       method: 'POST',
@@ -267,8 +388,36 @@ export const api = {
     request(`/videos/${videoId}/transcribe`, processingJobSchema, {
       method: 'POST',
     }),
-  getClipPlaybackUrl: (clipId: string) =>
-    request(`/clips/${clipId}/playback`, clipUrlSchema),
-  getClipDownloadUrl: (clipId: string) =>
-    request(`/clips/${clipId}/download`, clipUrlSchema),
+  getClipPlaybackUrl: (clipId: string, options: ClipUrlOptions = {}) =>
+    request(clipUrlPath(clipId, 'playback', options), clipUrlSchema),
+  getClipDownloadUrl: (clipId: string, options: ClipUrlOptions = {}) =>
+    request(clipUrlPath(clipId, 'download', options), clipUrlSchema),
+  getVideoRenders: (videoId: string) =>
+    request(`/videos/${videoId}/renders`, clipRendersSchema),
+  renderClip: (
+    clipId: string,
+    options: RenderRequestOptions = { subtitles: false },
+  ) =>
+    request(`/clips/${clipId}/renders`, clipRenderSchema, {
+      method: 'POST',
+      body: renderRequestBody(options),
+    }),
+  renderAllClips: (
+    videoId: string,
+    options: RenderRequestOptions = { subtitles: false },
+  ) =>
+    request(`/videos/${videoId}/renders`, clipRendersSchema, {
+      method: 'POST',
+      body: renderRequestBody({ ...options, edits: undefined }),
+    }),
+  getRenderDownloadUrl: (renderId: string) =>
+    request(`/renders/${renderId}/download`, clipUrlSchema),
+  getClipSubtitles: (clipId: string) =>
+    request(`/clips/${clipId}/subtitles`, clipSubtitlesSchema),
+  getSubtitleStyleCatalog: () =>
+    request('/subtitles/styles', subtitleStyleCatalogSchema),
+  retryRender: (renderId: string) =>
+    request(`/renders/${renderId}/retry`, clipRenderSchema, {
+      method: 'POST',
+    }),
 };

@@ -18,22 +18,44 @@ export interface AudioChunk {
   endSec: number;
 }
 
+interface GroqWord {
+  word: string;
+  start: number;
+  end: number;
+}
+
 interface GroqSegment {
   start: number;
   end: number;
   text: string;
+  words?: GroqWord[];
 }
+
+// A type alias (not an interface) so it is assignable to Prisma's JSON input.
+export type TranscriptWord = {
+  word: string;
+  startSec: number;
+  endSec: number;
+};
 
 interface MergedSegment {
   startSec: number;
   endSec: number;
   text: string;
+  words?: TranscriptWord[];
 }
 
 const CHUNK_DURATION_SEC = 600;
 const OVERLAP_SEC = 10;
 const MAX_GROQ_ATTEMPTS = 4;
 const GROQ_INITIAL_DELAY_MS = 1000;
+// A word whose midpoint falls outside every segment is attached to the nearest
+// segment only when it is at most this far away.
+const WORD_ATTACH_TOLERANCE_SEC = 1;
+
+function roundToMillis(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
 
 @Injectable()
 export class TranscriptionService {
@@ -195,12 +217,64 @@ export class TranscriptionService {
       model: 'whisper-large-v3',
       language,
       response_format: 'verbose_json',
-      timestamp_granularities: ['segment'],
+      timestamp_granularities: ['word', 'segment'],
     });
 
-    const rawSegments =
-      (response as unknown as { segments?: GroqSegment[] }).segments ?? [];
-    return rawSegments;
+    const body = response as unknown as {
+      segments?: GroqSegment[];
+      words?: GroqWord[];
+    };
+    return this.attachWordsToSegments(body.segments ?? [], body.words ?? []);
+  }
+
+  // Groq returns words as one flat list for the whole chunk. Each word is
+  // attached to the segment that contains its midpoint so the existing
+  // segment-level overlap handling also decides which words are kept.
+  private attachWordsToSegments(
+    segments: GroqSegment[],
+    words: GroqWord[],
+  ): GroqSegment[] {
+    if (words.length === 0) {
+      return segments;
+    }
+
+    const result = segments.map((segment) => ({
+      ...segment,
+      words: [] as GroqWord[],
+    }));
+
+    for (const word of words) {
+      if (
+        typeof word.word !== 'string' ||
+        !Number.isFinite(word.start) ||
+        !Number.isFinite(word.end)
+      ) {
+        continue;
+      }
+
+      const midpoint = (word.start + word.end) / 2;
+      let target = result.find(
+        (segment) => midpoint >= segment.start && midpoint <= segment.end,
+      );
+
+      if (!target) {
+        let bestDistance = WORD_ATTACH_TOLERANCE_SEC;
+        for (const segment of result) {
+          const distance =
+            midpoint < segment.start
+              ? segment.start - midpoint
+              : midpoint - segment.end;
+          if (distance <= bestDistance) {
+            bestDistance = distance;
+            target = segment;
+          }
+        }
+      }
+
+      target?.words.push(word);
+    }
+
+    return result;
   }
 
   // ─── 5.6 Merge & Storage ───────────────────────────────────────────────────
@@ -213,29 +287,28 @@ export class TranscriptionService {
   ): Promise<void> {
     const merged = this.mergeChunkSegments(chunks, chunkSegments);
 
+    const rows = merged.map((s) => ({
+      startSec: s.startSec,
+      endSec: s.endSec,
+      text: s.text,
+      // Segments without word timestamps keep the column empty so subtitles can
+      // tell exact timing from estimated timing.
+      words: s.words && s.words.length > 0 ? s.words : undefined,
+    }));
+
     await this.prisma.$transaction(async (tx) => {
       await tx.transcript.upsert({
         where: { videoId },
         create: {
           videoId,
           language,
-          segments: {
-            create: merged.map((s) => ({
-              startSec: s.startSec,
-              endSec: s.endSec,
-              text: s.text,
-            })),
-          },
+          segments: { create: rows },
         },
         update: {
           language,
           segments: {
             deleteMany: {},
-            create: merged.map((s) => ({
-              startSec: s.startSec,
-              endSec: s.endSec,
-              text: s.text,
-            })),
+            create: rows,
           },
         },
       });
@@ -282,12 +355,46 @@ export class TranscriptionService {
             startSec: absoluteStart,
             endSec: absoluteEnd,
             text,
+            words: this.toAbsoluteWords(seg.words, chunk.startSec),
           });
         }
       }
     }
 
     return merged.sort((a, b) => a.startSec - b.startSec);
+  }
+
+  // Chunk-relative Groq words become absolute video timestamps rounded to the
+  // millisecond, dropping empty or inverted entries.
+  private toAbsoluteWords(
+    words: GroqWord[] | undefined,
+    chunkStartSec: number,
+  ): TranscriptWord[] | undefined {
+    if (!words || words.length === 0) {
+      return undefined;
+    }
+
+    const absolute: TranscriptWord[] = [];
+    for (const raw of words) {
+      const word = typeof raw.word === 'string' ? raw.word.trim() : '';
+      const startSec = roundToMillis(chunkStartSec + raw.start);
+      const endSec = roundToMillis(chunkStartSec + raw.end);
+
+      if (
+        word.length === 0 ||
+        !Number.isFinite(startSec) ||
+        !Number.isFinite(endSec) ||
+        endSec < startSec
+      ) {
+        continue;
+      }
+
+      absolute.push({ word, startSec, endSec });
+    }
+
+    return absolute.length > 0
+      ? absolute.sort((a, b) => a.startSec - b.startSec)
+      : undefined;
   }
 
   async cleanupTempFiles(videoId: string, audioPath: string): Promise<void> {

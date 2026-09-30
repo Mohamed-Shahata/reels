@@ -1,3 +1,5 @@
+import type { SubtitleBurnIn } from '../subtitles/subtitle-overlay';
+
 export interface UploadSignatureInput {
   publicId: string;
 }
@@ -27,4 +29,10 @@ export interface VideoMetadata {
   durationSec: number;
   format: string;
   publicId: string;
+}
+
+export interface ClipUrlOptions {
+  reframe?: boolean;
+  /** Burned in only on reframed output, where the style sizes are calibrated. */
+  subtitles?: SubtitleBurnIn;
 }

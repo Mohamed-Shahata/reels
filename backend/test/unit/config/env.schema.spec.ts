@@ -29,6 +29,9 @@ describe('validateEnv', () => {
     expect(env.SEGMENTATION_MAX_COMPLETION_TOKENS).toBe(3000);
     expect(env.SEGMENTATION_CONCURRENCY).toBe(1);
     expect(env.SEGMENTATION_VALIDATION_MAX_ATTEMPTS).toBe(3);
+    expect(env.SEGMENTATION_MONTHLY_RUN_LIMIT).toBe(20);
+    expect(env.RENDER_POLL_INTERVAL_MS).toBe(3000);
+    expect(env.RENDER_TIMEOUT_MS).toBe(300000);
     expect(env.VIDEO_ALLOWED_FORMATS).toEqual(['mp4', 'mov', 'webm']);
     expect(env.VIDEO_MAX_SIZE_BYTES).toBe(5 * 1024 * 1024 * 1024);
     expect(env.VIDEO_MAX_DURATION_SEC).toBe(4 * 60 * 60);
@@ -96,6 +99,9 @@ describe('validateEnv', () => {
     expect(() =>
       validateEnv({ ...validEnv, SEGMENTATION_VALIDATION_MAX_ATTEMPTS: '0' }),
     ).toThrow(/SEGMENTATION_VALIDATION_MAX_ATTEMPTS/);
+    expect(() =>
+      validateEnv({ ...validEnv, SEGMENTATION_MONTHLY_RUN_LIMIT: '0' }),
+    ).toThrow(/SEGMENTATION_MONTHLY_RUN_LIMIT/);
     expect(() =>
       validateEnv({
         ...validEnv,

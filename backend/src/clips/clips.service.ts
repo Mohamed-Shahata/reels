@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env.schema';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
+import type { ClipUrlOptions } from '../storage/storage.types';
 import type { CreateClipDto } from './dto/create-clip.dto';
 import type { UpdateClipDto } from './dto/update-clip.dto';
 import type { SplitClipDto } from './dto/split-clip.dto';
@@ -31,6 +32,24 @@ const clipWithVideoSelect = {
   endSec: true,
   video: { select: { cloudinaryId: true } },
 } as const;
+
+const aiRunSelect = {
+  id: true,
+  clipCount: true,
+  replacedClipCount: true,
+  segments: true,
+  createdAt: true,
+} as const;
+
+const AI_RUN_HISTORY_LIMIT = 20;
+
+export interface AiRunRecord {
+  id: string;
+  clipCount: number;
+  replacedClipCount: number;
+  segments: unknown;
+  createdAt: Date;
+}
 
 export interface ClipRecord {
   id: string;
@@ -92,10 +111,30 @@ export class ClipsService {
     });
   }
 
+  async countAiClips(userId: string, videoId: string): Promise<number> {
+    const video = await this.getReadyVideo(userId, videoId);
+
+    return this.prisma.clip.count({
+      where: { videoId: video.id, source: 'AI' },
+    });
+  }
+
+  async listAiRuns(userId: string, videoId: string): Promise<AiRunRecord[]> {
+    await this.getOwnedVideo(userId, videoId);
+
+    return this.prisma.segmentationRun.findMany({
+      where: { videoId, userId },
+      orderBy: { createdAt: 'desc' },
+      take: AI_RUN_HISTORY_LIMIT,
+      select: aiRunSelect,
+    });
+  }
+
   async createAiSuggestions(
     userId: string,
     videoId: string,
     segments: ReconciledTopicSegment[],
+    options: { replaceExisting?: boolean } = {},
   ): Promise<ClipRecord[]> {
     const video = await this.getReadyVideo(userId, videoId);
     if (segments.length === 0) {
@@ -107,6 +146,13 @@ export class ClipsService {
     }
 
     return this.prisma.$transaction(async (transaction) => {
+      const replaced = options.replaceExisting
+        ? (
+            await transaction.clip.deleteMany({
+              where: { videoId: video.id, source: 'AI' },
+            })
+          ).count
+        : 0;
       const clips = await transaction.clip.createManyAndReturn({
         data: segments.map((segment) => ({
           videoId: video.id,
@@ -118,6 +164,20 @@ export class ClipsService {
         select: clipSelect,
       });
       await this.recordClipUsage(userId, segments.length, transaction);
+      await transaction.segmentationRun.create({
+        data: {
+          userId,
+          videoId: video.id,
+          clipCount: clips.length,
+          replacedClipCount: replaced,
+          segments: segments.map(({ title, startSec, endSec, summary }) => ({
+            title,
+            startSec,
+            endSec,
+            summary,
+          })),
+        },
+      });
       return clips.sort((left, right) => left.startSec - right.startSec);
     });
   }
@@ -261,24 +321,37 @@ export class ClipsService {
     await this.prisma.clip.delete({ where: { id: clip.id } });
   }
 
-  async getPlaybackUrl(userId: string, clipId: string): Promise<string> {
+  async getPlaybackUrl(
+    userId: string,
+    clipId: string,
+    options: ClipUrlOptions = {},
+  ): Promise<string> {
     const clip = await this.getOwnedStoredClip(userId, clipId);
 
     return this.storage.getClipPlaybackUrl(
       clip.video.cloudinaryId,
       clip.startSec,
       clip.endSec,
+      options,
     );
   }
 
-  async getDownloadUrl(userId: string, clipId: string): Promise<string> {
+  async getDownloadUrl(
+    userId: string,
+    clipId: string,
+    options: ClipUrlOptions = {},
+  ): Promise<string> {
     const clip = await this.getOwnedStoredClip(userId, clipId);
+    const filename = options.reframe
+      ? `clip-${clip.id}-9x16`
+      : `clip-${clip.id}`;
 
     return this.storage.getClipDownloadUrl(
       clip.video.cloudinaryId,
       clip.startSec,
       clip.endSec,
-      `clip-${clip.id}`,
+      filename,
+      options,
     );
   }
 

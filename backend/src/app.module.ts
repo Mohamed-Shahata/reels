@@ -6,7 +6,9 @@ import { AppConfigModule } from './config/app-config.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
+import { SubtitlesModule } from './subtitles/subtitles.module';
 import { ProcessingModule } from './processing/processing.module';
+import { RendersModule } from './renders/renders.module';
 import { SegmentationModule } from './segmentation/segmentation.module';
 import { UsageModule } from './usage/usage.module';
 import { VideosModule } from './videos/videos.module';
@@ -20,6 +22,8 @@ import { VideosModule } from './videos/videos.module';
     AuthModule,
     VideosModule,
     ClipsModule,
+    RendersModule,
+    SubtitlesModule,
     UsageModule,
     ProcessingModule.register(),
     SegmentationModule,

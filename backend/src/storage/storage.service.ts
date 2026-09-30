@@ -1,13 +1,31 @@
+import { createHash } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 import type { Env } from '../config/env.schema';
+import {
+  buildSubtitleOverlay,
+  type SubtitleBurnIn,
+} from '../subtitles/subtitle-overlay';
 import type {
+  ClipUrlOptions,
   UploadConstraints,
   UploadSignature,
   UploadSignatureInput,
   VideoMetadata,
 } from './storage.types';
+
+const REEL_ASPECT_RATIO = '9:16';
+const REEL_WIDTH_PX = 1080;
+
+function isAlreadyExistsError(error: unknown): boolean {
+  const { error: details } = (error ?? {}) as {
+    error?: { message?: string; http_code?: number };
+  };
+  return (
+    details?.http_code === 409 || /already exists/i.test(details?.message ?? '')
+  );
+}
 
 export class UploadAssetNotReadyError extends Error {
   constructor() {
@@ -89,12 +107,13 @@ export class StorageService {
     publicId: string,
     startSec: number,
     endSec: number,
+    options: ClipUrlOptions = {},
   ): string {
     return cloudinary.url(publicId, {
       resource_type: 'video',
       secure: true,
       format: 'mp4',
-      transformation: [{ start_offset: startSec, end_offset: endSec }],
+      transformation: this.buildClipTransformation(startSec, endSec, options),
     });
   }
 
@@ -122,14 +141,77 @@ export class StorageService {
     startSec: number,
     endSec: number,
     filename: string,
+    options: ClipUrlOptions = {},
   ): string {
     return cloudinary.url(publicId, {
       resource_type: 'video',
       secure: true,
       format: 'mp4',
       flags: `streaming_attachment:${filename}`,
-      transformation: [{ start_offset: startSec, end_offset: endSec }],
+      transformation: this.buildClipTransformation(startSec, endSec, options),
     });
+  }
+
+  async startClipReelRender(
+    publicId: string,
+    startSec: number,
+    endSec: number,
+    subtitles?: SubtitleBurnIn,
+  ): Promise<string> {
+    const options: ClipUrlOptions = { reframe: true, subtitles };
+
+    if (subtitles) await this.ensureSubtitleTransformation(subtitles);
+
+    await cloudinary.uploader.explicit(publicId, {
+      type: 'upload',
+      resource_type: 'video',
+      eager: [
+        {
+          transformation: this.buildClipTransformation(
+            startSec,
+            endSec,
+            options,
+          ),
+          format: 'mp4',
+        },
+      ],
+      eager_async: true,
+    });
+
+    return this.getClipPlaybackUrl(publicId, startSec, endSec, options);
+  }
+
+  /**
+   * Every cue is one text layer, so a clip with a lot of speech would build a
+   * delivery URL that is too long. The layers are stored once as a named
+   * transformation and the URL only carries its short name. The name comes
+   * from the content, so the same subtitles always give the same name.
+   */
+  private getSubtitleTransformation(
+    burnIn: SubtitleBurnIn,
+  ): { name: string; definition: string } | null {
+    const layers = buildSubtitleOverlay(burnIn, REEL_WIDTH_PX);
+    if (layers.length === 0) return null;
+
+    const definition = cloudinary.utils.generate_transformation_string({
+      transformation: layers,
+    });
+    const hash = createHash('sha256').update(definition).digest('hex');
+    return { name: `subs_${hash.slice(0, 24)}`, definition };
+  }
+
+  async ensureSubtitleTransformation(burnIn: SubtitleBurnIn): Promise<void> {
+    const transformation = this.getSubtitleTransformation(burnIn);
+    if (!transformation) return;
+
+    try {
+      await cloudinary.api.create_transformation(
+        transformation.name,
+        transformation.definition,
+      );
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) throw error;
+    }
   }
 
   getVideoPublicId(userId: string, videoId: string): string {
@@ -203,6 +285,31 @@ export class StorageService {
       bytes: BigInt(resource.bytes),
       format,
     };
+  }
+
+  private buildClipTransformation(
+    startSec: number,
+    endSec: number,
+    options: ClipUrlOptions,
+  ) {
+    const trim = { start_offset: startSec, end_offset: endSec };
+    if (!options.reframe) return [trim];
+
+    const reframed = [
+      trim,
+      {
+        crop: 'fill',
+        aspect_ratio: REEL_ASPECT_RATIO,
+        width: REEL_WIDTH_PX,
+        gravity: 'auto:faces',
+      },
+    ];
+    if (!options.subtitles) return reframed;
+
+    const subtitles = this.getSubtitleTransformation(options.subtitles);
+    if (!subtitles) return reframed;
+
+    return [...reframed, { transformation: subtitles.name }];
   }
 
   private isCloudinaryNotFound(error: unknown): boolean {

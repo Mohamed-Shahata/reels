@@ -2,15 +2,38 @@
 
 import { useAuth } from '@/components/auth/auth-provider';
 import { PageLoading } from '@/components/common/page-loading';
+import {
+  BulkRenderControls,
+  ClipRenderControls,
+} from '@/components/videos/clip-render-controls';
+import { SubtitleStylePanel } from '@/components/videos/subtitle-style-panel';
+import { SubtitleTextEditor } from '@/components/videos/subtitle-text-editor';
 import { TranscriptViewer } from '@/components/videos/transcript-viewer';
 import {
   api,
   getApiErrorMessage,
   type Clip,
+  type ClipRender,
   type LibraryVideo,
   type ProcessingJob,
   type Transcript,
+  type Usage,
 } from '@/lib/api';
+import {
+  hasClipOverrides,
+  isBurnInEnabled,
+  resolveVariant,
+  toRenderOptions,
+} from '@/lib/burn-in';
+import {
+  pickRender,
+  summarizeRenders,
+  type RenderVariant,
+} from '@/lib/clip-render';
+import { useBurnIn } from '@/lib/use-burn-in';
+import { useCueEdits } from '@/lib/use-cue-edits';
+import { useSubtitleStyle } from '@/lib/use-subtitle-style';
+import { useVideoRenders } from '@/lib/use-video-renders';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -24,6 +47,7 @@ export default function VideoWorkspacePage() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [jobs, setJobs] = useState<ProcessingJob[]>([]);
   const [transcript, setTranscript] = useState<Transcript | null>(null);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [originalUrl, setOriginalUrl] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
@@ -31,6 +55,9 @@ export default function VideoWorkspacePage() {
   const [startInput, setStartInput] = useState('0:00');
   const [endInput, setEndInput] = useState('0:00');
   const [previewEndSec, setPreviewEndSec] = useState<number | null>(null);
+  const [previewFrame, setPreviewFrame] = useState<'landscape' | 'vertical'>(
+    'landscape',
+  );
   const [savingClip, setSavingClip] = useState(false);
   const [creatingAiClips, setCreatingAiClips] = useState(false);
   const [editingClipId, setEditingClipId] = useState<string | null>(null);
@@ -41,6 +68,16 @@ export default function VideoWorkspacePage() {
   const [selectedClipIds, setSelectedClipIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const renders = useVideoRenders(
+    params.id,
+    status === 'authenticated' && video !== null,
+    setError,
+  );
+  const subtitleStyle = useSubtitleStyle(
+    status === 'authenticated' && video !== null,
+  );
+  const burnIn = useBurnIn();
+  const cueEdits = useCueEdits();
 
   useEffect(() => {
     if (status === 'unauthenticated') router.replace('/login');
@@ -55,24 +92,36 @@ export default function VideoWorkspacePage() {
       api.getVideoPlaybackUrl(params.id),
       api.getVideoProcessingJobs(params.id),
       api.getVideoTranscript(params.id).catch(() => null),
+      api.getUsage().catch(() => null),
     ])
-      .then(([videos, nextClips, playback, nextJobs, nextTranscript]) => {
-        const nextVideo = videos.find((item) => item.id === params.id) ?? null;
-        if (!nextVideo) {
-          setError('Video was not found.');
-          return;
-        }
-        if (nextVideo.status !== 'READY') {
-          setError('This video is not ready for clipping yet.');
-          return;
-        }
-        setVideo(nextVideo);
-        setClips(nextClips);
-        setJobs(nextJobs);
-        setTranscript(nextTranscript);
-        setSourceUrl(playback.url);
-        setOriginalUrl(playback.url);
-      })
+      .then(
+        ([
+          videos,
+          nextClips,
+          playback,
+          nextJobs,
+          nextTranscript,
+          nextUsage,
+        ]) => {
+          const nextVideo =
+            videos.find((item) => item.id === params.id) ?? null;
+          if (!nextVideo) {
+            setError('Video was not found.');
+            return;
+          }
+          if (nextVideo.status !== 'READY') {
+            setError('This video is not ready for clipping yet.');
+            return;
+          }
+          setVideo(nextVideo);
+          setClips(nextClips);
+          setJobs(nextJobs);
+          setTranscript(nextTranscript);
+          setUsage(nextUsage);
+          setSourceUrl(playback.url);
+          setOriginalUrl(playback.url);
+        },
+      )
       .catch((requestError) => {
         setError(
           getApiErrorMessage(
@@ -90,7 +139,9 @@ export default function VideoWorkspacePage() {
     if (status !== 'authenticated' || !params.id) return;
 
     const activeJob = jobs.find(
-      (j) => j.status === 'PENDING' || j.status === 'RUNNING',
+      (j) =>
+        j.type === 'TRANSCRIPTION' &&
+        (j.status === 'PENDING' || j.status === 'RUNNING'),
     );
     if (!activeJob) return;
 
@@ -100,7 +151,9 @@ export default function VideoWorkspacePage() {
         .then((updatedJobs) => {
           setJobs(updatedJobs);
           const wasActive = updatedJobs.some(
-            (j) => j.status === 'PENDING' || j.status === 'RUNNING',
+            (j) =>
+              j.type === 'TRANSCRIPTION' &&
+              (j.status === 'PENDING' || j.status === 'RUNNING'),
           );
           if (!wasActive) {
             // Processing just completed, fetch transcript
@@ -116,11 +169,68 @@ export default function VideoWorkspacePage() {
     return () => clearInterval(interval);
   }, [jobs, params.id, status]);
 
-  async function previewClip(clip: Clip) {
+  function variantForClip(clip: Clip): RenderVariant {
+    return resolveVariant(
+      subtitlesAvailable && isBurnInEnabled(burnIn.settings, clip.id),
+      subtitleStyle.selection?.style ?? null,
+      cueEdits.editsFor(clip),
+    );
+  }
+
+  function getRenderForClip(clip: Clip): ClipRender | undefined {
+    return pickRender(renders.rendersByClipId[clip.id], variantForClip(clip));
+  }
+
+  function getReadySubtitledRender(clip: Clip): ClipRender | null {
+    const render = getRenderForClip(clip);
+    return render?.subtitles &&
+      render.status === 'COMPLETED' &&
+      render.outputUrl &&
+      render.startSec === clip.startSec &&
+      render.endSec === clip.endSec
+      ? render
+      : null;
+  }
+
+  function startRender(clip: Clip) {
+    void renders.renderClip(
+      clip.id,
+      toRenderOptions(variantForClip(clip), subtitleStyle.selection),
+    );
+  }
+
+  function startRenderAll() {
+    if (!hasClipOverrides(burnIn.settings) && !hasEditedSubtitles) {
+      void renders.renderAll(
+        toRenderOptions(
+          resolveVariant(
+            subtitlesAvailable && burnIn.settings.enabled,
+            subtitleStyle.selection?.style ?? null,
+          ),
+          subtitleStyle.selection,
+        ),
+      );
+      return;
+    }
+
+    void renders.renderEach(
+      clips.map((clip) => ({
+        clipId: clip.id,
+        options: toRenderOptions(variantForClip(clip), subtitleStyle.selection),
+      })),
+    );
+  }
+
+  async function previewClip(clip: Clip, reframe = false) {
     setError(null);
     try {
-      const { url } = await api.getClipPlaybackUrl(clip.id);
+      const subtitledRender = reframe ? getReadySubtitledRender(clip) : null;
+      const url =
+        subtitledRender?.outputUrl ??
+        (await api.getClipPlaybackUrl(clip.id, { reframe })).url;
       setSourceUrl(url);
+      setPreviewFrame(reframe ? 'vertical' : 'landscape');
+      setPreviewEndSec(null);
       setCurrentTime(0);
     } catch (requestError) {
       setError(
@@ -172,6 +282,7 @@ export default function VideoWorkspacePage() {
     }
     setError(null);
     setSourceUrl(originalUrl);
+    setPreviewFrame('landscape');
     setPreviewEndSec(endSec);
     window.setTimeout(() => seekTo(startSec), 0);
   }
@@ -205,12 +316,25 @@ export default function VideoWorkspacePage() {
 
   async function createAiClips() {
     if (!params.id) return;
+    const existingAiClips = clips.filter((clip) => clip.source === 'AI').length;
+    if (
+      existingAiClips > 0 &&
+      !window.confirm(
+        `Replace the ${existingAiClips} AI suggestions with a new set? This uses one AI run. Clips you edited or created manually are kept.`,
+      )
+    ) {
+      return;
+    }
     setCreatingAiClips(true);
     setError(null);
     try {
-      const created = await api.createAiClips(params.id);
+      const created = await api.createAiClips(params.id, {
+        confirmReplace: existingAiClips > 0,
+      });
       setClips((current) =>
-        [...current, ...created].sort((a, b) => a.startSec - b.startSec),
+        [...current.filter((clip) => clip.source !== 'AI'), ...created].sort(
+          (a, b) => a.startSec - b.startSec,
+        ),
       );
     } catch (requestError) {
       setError(
@@ -220,6 +344,10 @@ export default function VideoWorkspacePage() {
         ),
       );
     } finally {
+      api
+        .getUsage()
+        .then(setUsage)
+        .catch(() => {});
       setCreatingAiClips(false);
     }
   }
@@ -332,11 +460,16 @@ export default function VideoWorkspacePage() {
     }
   }
 
-  async function downloadClip(clipId: string) {
+  async function downloadClip(clipId: string, reframe = false) {
     setClipActionId(clipId);
     setError(null);
     try {
-      const { url } = await api.getClipDownloadUrl(clipId);
+      const clip = clips.find((candidate) => candidate.id === clipId);
+      const subtitledRender =
+        reframe && clip ? getReadySubtitledRender(clip) : null;
+      const { url } = subtitledRender
+        ? await api.getRenderDownloadUrl(subtitledRender.id)
+        : await api.getClipDownloadUrl(clipId, { reframe });
       window.location.assign(url);
     } catch (requestError) {
       setError(
@@ -346,6 +479,23 @@ export default function VideoWorkspacePage() {
       setClipActionId(null);
     }
   }
+
+  const transcriptionJobs = jobs.filter((job) => job.type === 'TRANSCRIPTION');
+  const subtitlesAvailable =
+    Boolean(transcript?.segments.length) && subtitleStyle.selection !== null;
+  const renderSummary = summarizeRenders(
+    clips,
+    renders.rendersByClipId,
+    variantForClip,
+  );
+  const hasEditedSubtitles = clips.some(
+    (clip) =>
+      subtitlesAvailable &&
+      isBurnInEnabled(burnIn.settings, clip.id) &&
+      cueEdits.editsFor(clip).length > 0,
+  );
+  const hasAiClips = clips.some((clip) => clip.source === 'AI');
+  const aiRunsExhausted = usage !== null && usage.aiRuns >= usage.aiRunLimit;
 
   if (status === 'loading') {
     return <PageLoading label="Loading video workspace..." />;
@@ -375,11 +525,11 @@ export default function VideoWorkspacePage() {
           ) : null}
         </div>
 
-        {jobs.length > 0 ? (
+        {transcriptionJobs.length > 0 ? (
           <div className="mt-6 border border-[#d8e1dc] bg-white p-4 shadow-sm">
             <h2 className="text-sm font-semibold">Processing Status</h2>
             <div className="mt-2 space-y-2">
-              {jobs.map((job) => (
+              {transcriptionJobs.map((job) => (
                 <div
                   key={job.id}
                   className="flex items-center justify-between text-sm"
@@ -442,7 +592,13 @@ export default function VideoWorkspacePage() {
         {video && !loading ? (
           <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_18rem]">
             <div>
-              <div className="aspect-video overflow-hidden bg-[#172321]">
+              <div
+                className={
+                  previewFrame === 'vertical'
+                    ? 'mx-auto aspect-[9/16] max-h-[36rem] overflow-hidden bg-[#172321]'
+                    : 'aspect-video overflow-hidden bg-[#172321]'
+                }
+              >
                 {sourceUrl ? (
                   <video
                     className="h-full w-full"
@@ -569,19 +725,42 @@ export default function VideoWorkspacePage() {
                 currentTime={currentTime}
                 onSeek={seekTo}
                 onTranscribe={() => void handleStartTranscription()}
-                isTranscribing={jobs.some(
+                isTranscribing={transcriptionJobs.some(
                   (j) => j.status === 'PENDING' || j.status === 'RUNNING',
                 )}
               />
               {transcript?.segments.length ? (
-                <button
-                  className="mt-5 h-10 w-full bg-[#0f766e] px-4 text-sm font-semibold text-white hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
-                  disabled={creatingAiClips}
-                  onClick={() => void createAiClips()}
-                  type="button"
-                >
-                  {creatingAiClips ? 'Creating AI clips' : 'Create AI clips'}
-                </button>
+                <div className="mt-5">
+                  <button
+                    className="h-10 w-full bg-[#0f766e] px-4 text-sm font-semibold text-white hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
+                    disabled={creatingAiClips || aiRunsExhausted}
+                    onClick={() => void createAiClips()}
+                    type="button"
+                  >
+                    {creatingAiClips
+                      ? 'Creating AI clips'
+                      : hasAiClips
+                        ? 'Re-run AI clips'
+                        : 'Create AI clips'}
+                  </button>
+                  {usage ? (
+                    <p className="mt-2 text-xs text-[#5f6e69]">
+                      {aiRunsExhausted
+                        ? `Monthly AI run limit reached (${usage.aiRuns} of ${usage.aiRunLimit}).`
+                        : `AI runs this month: ${usage.aiRuns} of ${usage.aiRunLimit}.`}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              {transcript?.segments.length ? (
+                <SubtitleStylePanel
+                  catalog={subtitleStyle.catalog}
+                  error={subtitleStyle.error}
+                  onChangeStyle={subtitleStyle.patchStyle}
+                  onChoosePreset={subtitleStyle.choosePreset}
+                  onReset={subtitleStyle.resetToPreset}
+                  selection={subtitleStyle.selection}
+                />
               ) : null}
             </div>
 
@@ -599,6 +778,16 @@ export default function VideoWorkspacePage() {
                   </button>
                 ) : null}
               </div>
+              <BulkRenderControls
+                burnSubtitles={subtitlesAvailable && burnIn.settings.enabled}
+                busy={renders.renderingAll}
+                hasClipOverrides={hasClipOverrides(burnIn.settings)}
+                hasEditedClips={hasEditedSubtitles}
+                onRenderAll={startRenderAll}
+                onToggleSubtitles={burnIn.setGlobal}
+                subtitlesAvailable={subtitlesAvailable}
+                summary={renderSummary}
+              />
               {clips.length === 0 ? (
                 <p className="mt-3 text-sm text-[#5f6e69]">No saved clips.</p>
               ) : (
@@ -727,6 +916,38 @@ export default function VideoWorkspacePage() {
                                 Delete
                               </button>
                             </div>
+                            <ClipRenderControls
+                              burnSubtitles={
+                                subtitlesAvailable &&
+                                isBurnInEnabled(burnIn.settings, clip.id)
+                              }
+                              busy={renders.busyClipIds.includes(clip.id)}
+                              clip={clip}
+                              onDownload={() =>
+                                void downloadClip(clip.id, true)
+                              }
+                              onPreview={() => void previewClip(clip, true)}
+                              onRender={() => startRender(clip)}
+                              onRetry={(renderId) =>
+                                void renders.retryRender(clip.id, renderId)
+                              }
+                              onToggleSubtitles={(enabled) =>
+                                burnIn.setForClip(clip.id, enabled)
+                              }
+                              render={getRenderForClip(clip)}
+                              subtitlesAvailable={subtitlesAvailable}
+                            />
+                            {subtitlesAvailable &&
+                            isBurnInEnabled(burnIn.settings, clip.id) ? (
+                              <SubtitleTextEditor
+                                clip={clip}
+                                edits={cueEdits.editsFor(clip)}
+                                key={`${clip.id}-${clip.startSec}-${clip.endSec}`}
+                                onChange={(edits) =>
+                                  cueEdits.setEdits(clip, edits)
+                                }
+                              />
+                            ) : null}
                           </>
                         )}
                       </li>

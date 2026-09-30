@@ -1,4 +1,4 @@
-import { INestApplication } from '@nestjs/common';
+import { ConflictException, INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
@@ -29,7 +29,7 @@ describe('POST /api/v1/videos (e2e)', () => {
     getVideoPublicId: jest.Mock;
     getLegacyVideoPublicIds: jest.Mock;
   };
-  let segmentation: { suggest: jest.Mock };
+  let segmentation: { suggest: jest.Mock; assertReady: jest.Mock };
 
   beforeEach(async () => {
     prisma = createPrismaFake();
@@ -65,7 +65,10 @@ describe('POST /api/v1/videos (e2e)', () => {
         `podcast-reels/videos/${userId}/${videoId}`,
       ]),
     };
-    segmentation = { suggest: jest.fn() };
+    segmentation = {
+      suggest: jest.fn(),
+      assertReady: jest.fn().mockResolvedValue(undefined),
+    };
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
@@ -336,6 +339,8 @@ describe('POST /api/v1/videos (e2e)', () => {
       month: '2026-09',
       uploadedMinutes: 2,
       clipCount: 2,
+      aiRuns: 0,
+      aiRunLimit: 2,
     });
 
     const otherUser = await registerAndLogin('other@example.com');
@@ -343,7 +348,13 @@ describe('POST /api/v1/videos (e2e)', () => {
       .get('/api/v1/usage?month=2026-09')
       .set('Cookie', otherUser)
       .expect(200)
-      .expect({ month: '2026-09', uploadedMinutes: 0, clipCount: 0 });
+      .expect({
+        month: '2026-09',
+        uploadedMinutes: 0,
+        clipCount: 0,
+        aiRuns: 0,
+        aiRunLimit: 2,
+      });
   });
 
   it('completes the local MVP flow for a one-hour video and five downloads', async () => {
@@ -502,6 +513,182 @@ describe('POST /api/v1/videos (e2e)', () => {
     ]);
   });
 
+  describe('AI re-runs and cost control', () => {
+    const firstSet = [
+      { title: 'Opening', startSec: 0, endSec: 30, summary: 'Opening topic.' },
+      { title: 'Close', startSec: 30, endSec: 64.5, summary: 'Closing topic.' },
+    ];
+    const secondSet = [
+      {
+        title: 'Whole talk',
+        startSec: 0,
+        endSec: 64.5,
+        summary: 'Everything.',
+      },
+    ];
+
+    async function createReadyVideo(cookies: string) {
+      await request(app.getHttpServer())
+        .post('/api/v1/videos')
+        .set('Cookie', cookies)
+        .send({ title: 'Episode 42' })
+        .expect(201);
+      storage.getVideoMetadata.mockResolvedValue({
+        publicId: 'podcast-reels/uploads/user-1/video-1',
+        durationSec: 64.5,
+        bytes: 123456n,
+      });
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/complete')
+        .set('Cookie', cookies)
+        .expect(200);
+    }
+
+    it('requires confirmation to re-run and keeps manually edited clips', async () => {
+      const cookies = await registerAndLogin('user@example.com');
+      await createReadyVideo(cookies);
+      segmentation.suggest.mockResolvedValueOnce(firstSet);
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .expect(201);
+      await request(app.getHttpServer())
+        .patch('/api/v1/clips/clip-1')
+        .set('Cookie', cookies)
+        .send({ title: 'Edited opening' })
+        .expect(200);
+
+      const rejected = await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .expect(409);
+      expect((rejected.body as ErrorResponseBody).message).toMatch(
+        /already has 1 AI clips/,
+      );
+      expect(segmentation.suggest).toHaveBeenCalledTimes(1);
+      expect(prisma.usageRecords[0].aiRunCount).toBe(1);
+
+      segmentation.suggest.mockResolvedValueOnce(secondSet);
+      const replaced = await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .send({ confirmReplace: true })
+        .expect(201);
+
+      expect(replaced.body).toEqual([
+        expect.objectContaining({ title: 'Whole talk', source: 'AI' }),
+      ]);
+      expect(prisma.clips.map((clip) => [clip.title, clip.source])).toEqual([
+        ['Edited opening', 'MANUAL'],
+        ['Whole talk', 'AI'],
+      ]);
+      expect(prisma.usageRecords[0].aiRunCount).toBe(2);
+    });
+
+    it('rejects runs beyond the monthly limit without calling the provider', async () => {
+      const cookies = await registerAndLogin('user@example.com');
+      await createReadyVideo(cookies);
+      segmentation.suggest.mockResolvedValue(firstSet);
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .expect(201);
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .send({ confirmReplace: true })
+        .expect(201);
+
+      const limited = await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .send({ confirmReplace: true })
+        .expect(429);
+
+      expect((limited.body as ErrorResponseBody).message).toBe(
+        'Monthly AI run limit of 2 has been reached',
+      );
+      expect(segmentation.suggest).toHaveBeenCalledTimes(2);
+      const usage = await request(app.getHttpServer())
+        .get('/api/v1/usage')
+        .set('Cookie', cookies)
+        .expect(200);
+      expect(usage.body).toMatchObject({ aiRuns: 2, aiRunLimit: 2 });
+    });
+
+    it('does not count a run when the transcript is not ready', async () => {
+      const cookies = await registerAndLogin('user@example.com');
+      await createReadyVideo(cookies);
+      segmentation.assertReady.mockRejectedValueOnce(
+        new ConflictException(
+          'Transcript must be ready before generating AI clips',
+        ),
+      );
+
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .expect(409);
+
+      expect(segmentation.suggest).not.toHaveBeenCalled();
+      expect(prisma.usageRecords[0]?.aiRunCount ?? 0).toBe(0);
+    });
+
+    it('stores every run and lists them only to the video owner', async () => {
+      const owner = await registerAndLogin('owner@example.com');
+      await createReadyVideo(owner);
+      segmentation.suggest.mockResolvedValueOnce(firstSet);
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', owner)
+        .expect(201);
+      segmentation.suggest.mockResolvedValueOnce(secondSet);
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', owner)
+        .send({ confirmReplace: true })
+        .expect(201);
+
+      const runs = await request(app.getHttpServer())
+        .get('/api/v1/videos/video-1/ai-runs')
+        .set('Cookie', owner)
+        .expect(200);
+      expect(runs.body).toEqual([
+        expect.objectContaining({
+          clipCount: 1,
+          replacedClipCount: 2,
+          segments: secondSet,
+        }),
+        expect.objectContaining({
+          clipCount: 2,
+          replacedClipCount: 0,
+          segments: firstSet,
+        }),
+      ]);
+
+      const stranger = await registerAndLogin('stranger@example.com');
+      await request(app.getHttpServer())
+        .get('/api/v1/videos/video-1/ai-runs')
+        .set('Cookie', stranger)
+        .expect(404);
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', stranger)
+        .expect(404);
+    });
+
+    it('rejects an invalid confirmation flag', async () => {
+      const cookies = await registerAndLogin('user@example.com');
+      await createReadyVideo(cookies);
+
+      await request(app.getHttpServer())
+        .post('/api/v1/videos/video-1/ai-clips')
+        .set('Cookie', cookies)
+        .send({ confirmReplace: 'yes' })
+        .expect(400);
+    });
+  });
+
   it('splits a clip at a valid point and merges the selected clips again', async () => {
     const cookies = await registerAndLogin('user@example.com');
     await request(app.getHttpServer())
@@ -585,6 +772,77 @@ describe('POST /api/v1/videos (e2e)', () => {
     const otherUser = await registerAndLogin('other@example.com');
     await request(app.getHttpServer())
       .get('/api/v1/clips/clip-1/playback')
+      .set('Cookie', otherUser)
+      .expect(404);
+  });
+
+  it('serves reframed clip URLs only when reframe=true and rejects invalid values', async () => {
+    const owner = await registerAndLogin('owner@example.com');
+    await request(app.getHttpServer())
+      .post('/api/v1/videos')
+      .set('Cookie', owner)
+      .send({ title: 'Episode 42' })
+      .expect(201);
+    storage.getVideoMetadata.mockResolvedValue({
+      publicId: 'podcast-reels/uploads/user-1/video-1',
+      durationSec: 64.5,
+      bytes: 123456n,
+    });
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/complete')
+      .set('Cookie', owner)
+      .expect(200);
+    await request(app.getHttpServer())
+      .post('/api/v1/videos/video-1/clips')
+      .set('Cookie', owner)
+      .send({ title: 'Valid range', startSec: 10, endSec: 30 })
+      .expect(201);
+
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/playback?reframe=true')
+      .set('Cookie', owner)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/download?reframe=true')
+      .set('Cookie', owner)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/download?reframe=false')
+      .set('Cookie', owner)
+      .expect(200);
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/playback?reframe=maybe')
+      .set('Cookie', owner)
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/playback?unknown=1')
+      .set('Cookie', owner)
+      .expect(400);
+
+    expect(storage.getClipPlaybackUrl).toHaveBeenCalledWith(
+      'podcast-reels/uploads/user-1/video-1',
+      10,
+      30,
+      { reframe: true },
+    );
+    expect(storage.getClipDownloadUrl).toHaveBeenCalledWith(
+      'podcast-reels/uploads/user-1/video-1',
+      10,
+      30,
+      'clip-clip-1-9x16',
+      { reframe: true },
+    );
+    expect(storage.getClipDownloadUrl).toHaveBeenLastCalledWith(
+      'podcast-reels/uploads/user-1/video-1',
+      10,
+      30,
+      'clip-clip-1',
+      { reframe: false },
+    );
+
+    const otherUser = await registerAndLogin('other@example.com');
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/download?reframe=true')
       .set('Cookie', otherUser)
       .expect(404);
   });

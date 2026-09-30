@@ -8,11 +8,14 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthContext } from '../auth/jwt-auth.guard';
 import { ClipsService } from './clips.service';
-import { TopicSegmentationService } from '../segmentation/topic-segmentation.service';
+import { AiClipRunsService } from './ai-clip-runs.service';
+import { ClipUrlQueryDto } from './dto/clip-url-query.dto';
+import { CreateAiClipsDto } from './dto/create-ai-clips.dto';
 import { CreateClipDto } from './dto/create-clip.dto';
 import { UpdateClipDto } from './dto/update-clip.dto';
 import { SplitClipDto } from './dto/split-clip.dto';
@@ -22,7 +25,7 @@ import { MergeClipsDto } from './dto/merge-clips.dto';
 export class ClipsController {
   constructor(
     private readonly clips: ClipsService,
-    private readonly segmentation: TopicSegmentationService,
+    private readonly aiRuns: AiClipRunsService,
   ) {}
 
   @Post('videos/:videoId/clips')
@@ -35,12 +38,20 @@ export class ClipsController {
   }
 
   @Post('videos/:videoId/ai-clips')
-  async createAiSuggestions(
+  createAiSuggestions(
+    @CurrentUser() auth: AuthContext,
+    @Param('videoId') videoId: string,
+    @Body() dto: CreateAiClipsDto,
+  ) {
+    return this.aiRuns.run(auth.userId, videoId, dto);
+  }
+
+  @Get('videos/:videoId/ai-runs')
+  listAiRuns(
     @CurrentUser() auth: AuthContext,
     @Param('videoId') videoId: string,
   ) {
-    const segments = await this.segmentation.suggest(auth.userId, videoId);
-    return this.clips.createAiSuggestions(auth.userId, videoId, segments);
+    return this.clips.listAiRuns(auth.userId, videoId);
   }
 
   @Post('videos/:videoId/clips/merge')
@@ -76,13 +87,29 @@ export class ClipsController {
   }
 
   @Get('clips/:id/playback')
-  async playback(@CurrentUser() auth: AuthContext, @Param('id') id: string) {
-    return { url: await this.clips.getPlaybackUrl(auth.userId, id) };
+  async playback(
+    @CurrentUser() auth: AuthContext,
+    @Param('id') id: string,
+    @Query() query: ClipUrlQueryDto,
+  ) {
+    return {
+      url: await this.clips.getPlaybackUrl(auth.userId, id, {
+        reframe: query.reframe,
+      }),
+    };
   }
 
   @Get('clips/:id/download')
-  async download(@CurrentUser() auth: AuthContext, @Param('id') id: string) {
-    return { url: await this.clips.getDownloadUrl(auth.userId, id) };
+  async download(
+    @CurrentUser() auth: AuthContext,
+    @Param('id') id: string,
+    @Query() query: ClipUrlQueryDto,
+  ) {
+    return {
+      url: await this.clips.getDownloadUrl(auth.userId, id, {
+        reframe: query.reframe,
+      }),
+    };
   }
 
   @Delete('clips/:id')

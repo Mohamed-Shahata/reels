@@ -7,6 +7,7 @@ import {
 } from './processing.constants';
 import { ProcessingJobsService } from './processing-jobs.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ClipRenderExecutorService } from '../renders/clip-render-executor.service';
 import { TranscriptionService } from '../transcription/transcription.service';
 @Processor(PROCESSING_QUEUE_NAME)
 export class ProcessingProcessor extends WorkerHost {
@@ -16,6 +17,7 @@ export class ProcessingProcessor extends WorkerHost {
     private readonly jobsService: ProcessingJobsService,
     private readonly prisma: PrismaService,
     private readonly transcriptionService: TranscriptionService,
+    private readonly renderExecutor: ClipRenderExecutorService,
   ) {
     super();
   }
@@ -81,6 +83,19 @@ export class ProcessingProcessor extends WorkerHost {
 
         // Cleanup temp files
         await this.transcriptionService.cleanupTempFiles(video.id, audioPath);
+      }
+
+      if (processingJob.type === 'RENDER') {
+        const clipRenderId = (
+          processingJob.payload as { clipRenderId?: string } | null
+        )?.clipRenderId;
+        if (!clipRenderId) {
+          throw new Error('RENDER job requires clipRenderId');
+        }
+
+        await this.renderExecutor.execute(clipRenderId, async (progress) => {
+          await this.jobsService.updateProgress(processingJobId, progress);
+        });
       }
 
       await this.jobsService.markCompleted(processingJobId);

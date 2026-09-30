@@ -5,7 +5,7 @@ import { PrismaService } from '../../../src/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rm, stat } from 'node:fs/promises';
+import { rm, stat, writeFile } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 
 describe('TranscriptionService', () => {
@@ -166,6 +166,184 @@ describe('TranscriptionService', () => {
       // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(prismaService.$transaction).toHaveBeenCalledTimes(1);
       expect(captured.length).toBe(1);
+    });
+  });
+
+  describe('word timestamps', () => {
+    const chunkPath = join(tmpdir(), 'podcast-reels-word-test.mp3');
+
+    beforeEach(async () => {
+      await writeFile(chunkPath, Buffer.from('audio'));
+    });
+
+    afterEach(async () => {
+      await rm(chunkPath, { force: true });
+    });
+
+    function mockGroq(response: unknown) {
+      const create = jest.fn().mockResolvedValue(response);
+      (service as unknown as { groq: unknown }).groq = {
+        audio: { transcriptions: { create } },
+      };
+      return create;
+    }
+
+    it('requests word and segment timestamps', async () => {
+      const create = mockGroq({ segments: [], words: [] });
+
+      await (
+        service as unknown as {
+          transcribeChunk: (
+            chunk: unknown,
+            language: string,
+          ) => Promise<unknown>;
+        }
+      ).transcribeChunk({ filePath: chunkPath, startSec: 0, endSec: 60 }, 'ar');
+
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          response_format: 'verbose_json',
+          timestamp_granularities: ['word', 'segment'],
+          language: 'ar',
+        }),
+      );
+    });
+
+    it('attaches each word to the segment that contains it', async () => {
+      mockGroq({
+        segments: [
+          { start: 0, end: 5, text: 'hello world' },
+          { start: 5, end: 9, text: 'again' },
+        ],
+        words: [
+          { word: 'hello', start: 0.1, end: 0.5 },
+          { word: 'world', start: 0.6, end: 1 },
+          { word: 'again', start: 5.2, end: 5.8 },
+        ],
+      });
+
+      const result = await (
+        service as unknown as {
+          transcribeChunk: (
+            chunk: unknown,
+            language: string,
+          ) => Promise<{ words: { word: string }[] }[]>;
+        }
+      ).transcribeChunk({ filePath: chunkPath, startSec: 0, endSec: 60 }, 'ar');
+
+      expect(result[0].words.map((w) => w.word)).toEqual(['hello', 'world']);
+      expect(result[1].words.map((w) => w.word)).toEqual(['again']);
+    });
+
+    it('attaches a word just outside a segment and drops a distant one', async () => {
+      mockGroq({
+        segments: [{ start: 0, end: 5, text: 'hello' }],
+        words: [
+          { word: 'hello', start: 0.1, end: 0.5 },
+          { word: 'near', start: 5.3, end: 5.7 },
+          { word: 'far', start: 20, end: 20.4 },
+        ],
+      });
+
+      const result = await (
+        service as unknown as {
+          transcribeChunk: (
+            chunk: unknown,
+            language: string,
+          ) => Promise<{ words: { word: string }[] }[]>;
+        }
+      ).transcribeChunk({ filePath: chunkPath, startSec: 0, endSec: 60 }, 'ar');
+
+      expect(result[0].words.map((w) => w.word)).toEqual(['hello', 'near']);
+    });
+
+    it('keeps segments unchanged when Groq returns no words', async () => {
+      mockGroq({ segments: [{ start: 0, end: 5, text: 'hello' }] });
+
+      const result = await (
+        service as unknown as {
+          transcribeChunk: (
+            chunk: unknown,
+            language: string,
+          ) => Promise<unknown>;
+        }
+      ).transcribeChunk({ filePath: chunkPath, startSec: 0, endSec: 60 }, 'ar');
+
+      expect(result).toEqual([{ start: 0, end: 5, text: 'hello' }]);
+    });
+
+    it('stores words with absolute video timestamps', async () => {
+      const chunks = [
+        { filePath: 'c0.mp3', startSec: 0, endSec: 600 },
+        { filePath: 'c1.mp3', startSec: 590, endSec: 1190 },
+      ];
+      const chunkSegments = [
+        [
+          {
+            start: 10,
+            end: 20,
+            text: 'Hello world',
+            words: [
+              { word: ' Hello', start: 10.25, end: 10.5 },
+              { word: 'world ', start: 10.75, end: 11 },
+            ],
+          },
+        ],
+        [
+          {
+            start: 50,
+            end: 60,
+            text: 'new content',
+            words: [
+              { word: 'new', start: 50.0004, end: 50.5 },
+              { word: 'content', start: 51, end: 52 },
+              { word: '  ', start: 52, end: 53 },
+              { word: 'inverted', start: 55, end: 54 },
+            ],
+          },
+          { start: 70, end: 75, text: 'no words' },
+        ],
+      ];
+
+      const captured: {
+        create: { segments: { create: Record<string, unknown>[] } };
+      }[] = [];
+      (prismaService.$transaction as jest.Mock).mockImplementation(
+        async (fn: (tx: unknown) => Promise<void>) =>
+          fn({
+            transcript: {
+              upsert: jest.fn().mockImplementation((args: never) => {
+                captured.push(args);
+                return Promise.resolve({});
+              }),
+            },
+          }),
+      );
+
+      await service.mergeAndStore('video-5', chunks, chunkSegments, 'ar');
+
+      const rows = captured[0].create.segments.create;
+      expect(rows).toEqual([
+        {
+          startSec: 10,
+          endSec: 20,
+          text: 'Hello world',
+          words: [
+            { word: 'Hello', startSec: 10.25, endSec: 10.5 },
+            { word: 'world', startSec: 10.75, endSec: 11 },
+          ],
+        },
+        {
+          startSec: 640,
+          endSec: 650,
+          text: 'new content',
+          words: [
+            { word: 'new', startSec: 640, endSec: 640.5 },
+            { word: 'content', startSec: 641, endSec: 642 },
+          ],
+        },
+        { startSec: 660, endSec: 665, text: 'no words', words: undefined },
+      ]);
     });
   });
 

@@ -24,18 +24,18 @@ Turn one long podcast video (about 1 hour) into a set of short clips ready for s
 
 The system is built feature by feature. Each phase must be complete, tested and stable before the next phase starts.
 
-| Phase | Scope |
-|-------|-------|
-| 0 | Project foundation |
-| 1 | Authentication |
-| 2 | Video upload with resume and retry |
-| 3 | Manual clipping |
-| 4 | MVP hardening |
-| 5 | Transcription |
-| 6 | AI topic segmentation |
-| 7 | 9:16 reframing |
-| 8 | Subtitles |
-| 9 | Subscriptions and production readiness |
+| Phase | Scope                                  |
+| ----- | -------------------------------------- |
+| 0     | Project foundation                     |
+| 1     | Authentication                         |
+| 2     | Video upload with resume and retry     |
+| 3     | Manual clipping                        |
+| 4     | MVP hardening                          |
+| 5     | Transcription                          |
+| 6     | AI topic segmentation                  |
+| 7     | 9:16 reframing                         |
+| 8     | Subtitles                              |
+| 9     | Subscriptions and production readiness |
 
 The first usable release (MVP) is the end of Phase 4: a user can register, upload a podcast and cut reels manually.
 
@@ -66,16 +66,16 @@ The first usable release (MVP) is the end of Phase 4: a user can register, uploa
 
 ### 3.1 Stack
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | Next.js (App Router), TypeScript, Tailwind CSS |
-| Backend | NestJS 11, TypeScript |
-| Database | PostgreSQL 16 with Prisma 7 (driver adapter `@prisma/adapter-pg`) |
-| Media storage and delivery | Cloudinary |
-| Queue (from Phase 5) | BullMQ with Redis |
-| Transcription (Phase 5) | Groq Whisper |
-| Topic analysis (Phase 6) | Groq LLM |
-| Video processing (Phases 7 and 8) | FFmpeg in a worker, or Cloudinary transformations |
+| Layer                             | Technology                                                        |
+| --------------------------------- | ----------------------------------------------------------------- |
+| Frontend                          | Next.js (App Router), TypeScript, Tailwind CSS                    |
+| Backend                           | NestJS 11, TypeScript                                             |
+| Database                          | PostgreSQL 16 with Prisma 7 (driver adapter `@prisma/adapter-pg`) |
+| Media storage and delivery        | Cloudinary                                                        |
+| Queue (from Phase 5)              | BullMQ with Redis                                                 |
+| Transcription (Phase 5)           | Groq Whisper                                                      |
+| Topic analysis (Phase 6)          | Groq LLM                                                          |
+| Video processing (Phases 7 and 8) | FFmpeg in a worker, or Cloudinary transformations                 |
 
 The frontend is a pure client of the backend REST API. Next.js is not used for long-running work.
 
@@ -176,13 +176,13 @@ All routes are prefixed with `/api/v1`. All request bodies are validated. All er
 
 ### Auth
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/auth/register` | Create an account |
-| POST | `/auth/login` | Log in and receive tokens |
-| POST | `/auth/refresh` | Rotate the refresh token |
-| POST | `/auth/logout` | Revoke the current session |
-| GET | `/auth/me` | Get the current user |
+| Method | Route            | Description                |
+| ------ | ---------------- | -------------------------- |
+| POST   | `/auth/register` | Create an account          |
+| POST   | `/auth/login`    | Log in and receive tokens  |
+| POST   | `/auth/refresh`  | Rotate the refresh token   |
+| POST   | `/auth/logout`   | Revoke the current session |
+| GET    | `/auth/me`       | Get the current user       |
 
 Login sets `access_token` and `refresh_token` as httpOnly cookies (`secure` in production, `sameSite=lax`); the refresh cookie is scoped to `/api/v1/auth`. Tokens are never returned in the response body. Wrong email or password returns a generic `401`.
 
@@ -194,26 +194,34 @@ Registration rules: `email` is trimmed, lowercased and must be a valid address (
 
 ### Videos
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/videos` | Create a video record and return upload signature |
-| POST | `/videos/:id/complete` | Confirm upload and store Cloudinary metadata |
-| GET | `/videos` | List the current user's videos |
-| GET | `/videos/:id` | Get one video with its clips |
-| PATCH | `/videos/:id` | Rename a video |
-| DELETE | `/videos/:id` | Delete a video and its Cloudinary asset |
+| Method | Route                  | Description                                       |
+| ------ | ---------------------- | ------------------------------------------------- |
+| POST   | `/videos`              | Create a video record and return upload signature |
+| POST   | `/videos/:id/complete` | Confirm upload and store Cloudinary metadata      |
+| GET    | `/videos`              | List the current user's videos                    |
+| GET    | `/videos/:id`          | Get one video with its clips                      |
+| PATCH  | `/videos/:id`          | Rename a video                                    |
+| DELETE | `/videos/:id`          | Delete a video and its Cloudinary asset           |
 
 ### Clips
 
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/videos/:id/clips` | Create a clip |
-| GET | `/videos/:id/clips` | List clips of a video |
-| PATCH | `/clips/:id` | Update title, start or end |
-| DELETE | `/clips/:id` | Delete a clip |
-| GET | `/clips/:id/download` | Get a download URL |
-| GET | `/clips/:id/playback` | Get a trimmed playback URL |
-| GET | `/usage?month=YYYY-MM` | Get the current user's monthly upload minutes and clip count |
+| Method | Route                      | Description                                                                                                                                                                      |
+| ------ | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/videos/:id/clips`        | Create a clip                                                                                                                                                                    |
+| POST   | `/videos/:id/ai-clips`     | Create AI clips; body `{ confirmReplace }` is required to replace existing AI clips                                                                                              |
+| GET    | `/videos/:id/ai-runs`      | List the stored AI runs of a video                                                                                                                                               |
+| GET    | `/videos/:id/clips`        | List clips of a video                                                                                                                                                            |
+| PATCH  | `/clips/:id`               | Update title, start or end                                                                                                                                                       |
+| DELETE | `/clips/:id`               | Delete a clip                                                                                                                                                                    |
+| GET    | `/clips/:id/download`      | Get a download URL; add `?reframe=true` for a 9:16 reel                                                                                                                          |
+| GET    | `/clips/:id/playback`      | Get a trimmed playback URL; add `?reframe=true` for a 9:16 reel                                                                                                                  |
+| POST   | `/clips/:id/renders`       | Queue a 9:16 render of a clip, optionally with subtitles burned in and corrected subtitle text (`subtitleEdits`); returns the existing render for an unchanged range and variant |
+| GET    | `/clips/:id/renders`       | List the newest renders of a clip with status, progress, error and output URL                                                                                                    |
+| POST   | `/videos/:videoId/renders` | Queue a 9:16 render of every clip of a video, optionally with subtitles burned in; unchanged ranges and variants reuse their existing render                                     |
+| GET    | `/videos/:videoId/renders` | Latest render of each clip of a video with status, progress, error and output URL                                                                                                |
+| POST   | `/renders/:id/retry`       | Re-queue a failed render for the clip's current range                                                                                                                            |
+| GET    | `/renders/:id/download`    | Download URL of a finished render, with the subtitles it was rendered with                                                                                                       |
+| GET    | `/usage?month=YYYY-MM`     | Get the current user's monthly upload minutes, clip count and AI runs                                                                                                            |
 
 ### Clip validation rules
 
@@ -227,12 +235,12 @@ Registration rules: `email` is trimmed, lowercased and must be a valid address (
 
 ## 6. Frontend Pages (MVP)
 
-| Route | Purpose |
-|-------|---------|
-| `/register` | Sign-up form |
-| `/login` | Login form |
-| `/videos` | Video library with status and upload button |
-| `/videos/new` | Upload screen with progress, pause, resume and retry |
+| Route          | Purpose                                               |
+| -------------- | ----------------------------------------------------- |
+| `/register`    | Sign-up form                                          |
+| `/login`       | Login form                                            |
+| `/videos`      | Video library with status and upload button           |
+| `/videos/new`  | Upload screen with progress, pause, resume and retry  |
 | `/videos/[id]` | Video player, timeline, clip creation form, clip list |
 
 The clipping screen must support: entering start and end time as `mm:ss`, setting start or end from the current playhead position, previewing the range before saving, and editing or deleting existing clips.
@@ -416,11 +424,11 @@ Acceptance: written result documenting what works, limits found, and the fallbac
 
 Tested against a real uploaded MP4 (`1280x720`, `96.2 MB`, `1680.145` seconds) in the configured Cloudinary product environment.
 
-| Check | Result |
-|-------|--------|
-| Playback URL for seconds `60` to `75` | Passed: returned `206` with `video/mp4`; generated clip size was `1,071,696` bytes |
+| Check                                      | Result                                                                                                                                 |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Playback URL for seconds `60` to `75`      | Passed: returned `206` with `video/mp4`; generated clip size was `1,071,696` bytes                                                     |
 | Attachment download URL for the same range | Passed: returned `206` with `Content-Disposition: attachment; filename="podcast-reel-60-75.mp4"` after the derived asset was generated |
-| Streaming attachment URL | Passed: returned `200` with attachment disposition immediately |
+| Streaming attachment URL                   | Passed: returned `200` with attachment disposition immediately                                                                         |
 
 The first request to a normal `fl_attachment` URL returned Cloudinary `423` while the derived clip was generated. The client must either retry that response or use `fl_streaming_attachment` for download actions. Preview URLs can be generated with `so` and `eo` offsets. Download URLs should use the same offsets plus `fl_streaming_attachment` and a sanitized filename.
 
@@ -600,23 +608,63 @@ Manual clip creation, editing and deletion continue to use the original endpoint
 Allow re-running segmentation, with usage limits and stored results.
 Acceptance: repeated runs are counted and can be limited per user.
 
+#### 6.8 Implementation result (2026-09-29)
+
+`POST /api/v1/videos/:videoId/ai-clips` now accepts an optional `{ "confirmReplace": true }` body. When the video already has AI clips, the request is rejected with `409` unless the replacement is confirmed; a confirmed re-run deletes only clips whose source is still `AI` and keeps every clip the user edited or created manually (editing already turns an AI clip into `MANUAL`). Deletion and creation happen in one transaction, so a failed run never leaves the video without its previous suggestions.
+
+Each run is counted per user and UTC month in `UsageRecord.aiRunCount`. The counter is reserved atomically (`updateMany` guarded by the limit) after the video and transcript checks pass and before the Groq pipeline starts, so concurrent requests cannot exceed `SEGMENTATION_MONTHLY_RUN_LIMIT` and a request beyond it returns `429` without calling the provider. Requests rejected for ownership, readiness, missing transcript or missing confirmation are not counted; a run that reaches the provider and then fails is still counted because the provider cost was incurred.
+
+Every successful run is stored in `SegmentationRun` (validated segments with title, range and summary, created clip count and replaced clip count). `GET /api/v1/videos/:videoId/ai-runs` returns the newest 20 runs for the owner. `GET /api/v1/usage` now also returns `aiRuns` and `aiRunLimit`. The workspace shows the remaining AI runs, asks for confirmation before replacing suggestions, and disables the action once the monthly limit is reached.
+
 ### Phase 7: 9:16 Reframing
 
 **7.1 Reframing strategy decision**
 Choose the approach after testing on real podcast videos: center crop, split screen (one speaker above the other), or active speaker tracking.
 Acceptance: written decision with sample outputs.
 
+#### 7.1 Implementation result (2026-09-29)
+
+Center crop with face gravity via Cloudinary URL transformations: `so_<start>,eo_<end>/c_fill,ar_9:16,g_auto:faces`. No FFmpeg worker or render queue is needed — the derived clip is produced on the first download request and cached by Cloudinary's CDN. The decision is documented in `docs/REFRAMING_STRATEGY.md`. Active speaker tracking remains Task 7.5.
+
 **7.2 Center crop or split screen renderer**
 Render a clip to 9:16 with the chosen simple strategy.
 Acceptance: output plays correctly on vertical platforms.
+
+#### 7.2 Implementation result (2026-09-29)
+
+`GET /api/v1/clips/:id/playback` and `GET /api/v1/clips/:id/download` accept an optional `reframe` query parameter (`true` or `false`; any other value or unknown parameter returns `400`). Without it the responses are unchanged. With `reframe=true` the returned Cloudinary URL applies the strategy chosen in Task 7.1 after the trim offsets: `so_<start>,eo_<end>/ar_9:16,c_fill,g_auto:faces,w_1080`, which delivers an MP4 at 1080x1920, the native size for Reels, TikTok and Shorts. Reframed downloads use the filename `clip-<id>-9x16` so they never collide with the original-framing file. Ownership is enforced exactly as before, so another user's clip returns `404` for both variants.
+
+The transformation lives in `StorageService` (`ClipUrlOptions.reframe`), and no render job or FFmpeg worker is involved: the derived clip is generated by Cloudinary on the first request and cached by its CDN. Unit tests cover the exact transformation for playback and download, the untouched default, and the ownership rejection. An end-to-end test covers the query parameter validation. The generated URL shape was verified locally, but a real one-hour production-like reel still needs the manual Cloudinary check that Task 3.1 and Task 4.6 already track. Queued renders with status and retry remain Task 7.3, and the per-clip and bulk UI remains Task 7.4.
 
 **7.3 Render pipeline**
 Render jobs on the queue with status, retry and output storage.
 Acceptance: a failed render can be retried without re-uploading anything.
 
+#### 7.3 Implementation result (2026-09-29)
+
+Rendering is now a tracked job. `POST /api/v1/clips/:id/renders` creates a `ClipRender` row (the range being rendered, the output URL and a link to its job) and a `ProcessingJob` of the new type `RENDER`, which is queued through the same BullMQ pipeline as transcription. The row is created before the job is queued, so a worker can never pick up a job whose render does not exist; if queueing fails the row is removed. Requesting a render for a clip whose range is unchanged returns the pending, running or completed render instead of queueing a duplicate.
+
+The worker (`ClipRenderExecutorService`) asks Cloudinary to pre-generate the derived reel as an eager asset (`so_/eo_` trim, then `ar_9:16,c_fill,g_auto:faces,w_1080`, delivered as MP4), then polls a `HEAD` request on the delivery URL every `RENDER_POLL_INTERVAL_MS` until it returns `200`, treating `404` and `423` as "still generating" as found in the Task 3.1 spike. Any other status, a network error or exceeding `RENDER_TIMEOUT_MS` fails the job with a stored error message. The output is stored as the derived asset in Cloudinary, and its URL is saved on `ClipRender.outputUrl`, so no FFmpeg worker and no extra file storage is needed. Job progress is reported as 10 when started and 30 once Cloudinary accepted the render, and the job completes at 100.
+
+`GET /api/v1/clips/:id/renders` returns each render with `status` (`PENDING`, `RUNNING`, `COMPLETED` or `FAILED`), `progress`, `attempts`, `error`, the rendered range and `outputUrl`. `POST /api/v1/renders/:id/retry` accepts only failed renders (`409` otherwise), resets the job and queues it again. The retry uses the clip's current range, so an edit made after the failure is picked up, and it never touches the uploaded video, which satisfies the acceptance criterion. All three routes resolve the clip or render through the requesting user's ownership and return `404` for anyone else. Deleting a clip or video removes its render rows. The migration `20260929180000_clip_renders` adds the `RENDER` job type and the `ClipRender` table; it was written by hand because the sandbox could not reach Prisma's engine downloads, so run `npm --prefix backend run db:migrate` once against a real database to confirm there is no schema drift.
+
+Unit tests cover render creation, ordering, reuse, ownership and queue failure, retry rules, the executor's polling, timeout and failure paths, the processor's `RENDER` branch, `retryJob`, and the Cloudinary eager request. A test-mode run cannot exercise BullMQ and Redis, so a real render on a Cloudinary account still needs a manual check, together with the pending Task 3.1 and Task 4.6 checks. The per-clip and bulk controls that use these endpoints remain Task 7.4.
+
 **7.4 Reframing options in the UI**
 Per-clip and bulk reframing controls with preview.
 Acceptance: the user can render one clip or all clips.
+
+#### 7.4 Implementation result (2026-09-29)
+
+The clip list in the video workspace now has a 9:16 reel section for every clip and a bulk control above the list. Each clip shows its reel status (`Not rendered`, `Queued`, `Rendering <progress>%`, `Ready` or `Failed`) and offers `Preview 9:16`, `Render 9:16`, `Download 9:16` or `Retry render` depending on that status. A render only counts for a clip while its stored range still equals the clip's current range, so editing, splitting or merging a clip returns it to `Not rendered` instead of offering a stale reel. `Render all clips (9:16)` queues every clip that has no current render and re-queues failed ones; it is disabled when every clip is already rendered or rendering, and it shows how many clips are ready, rendering and failed.
+
+`Preview 9:16` loads `GET /api/v1/clips/:id/playback?reframe=true` into the main player, which switches to a 9:16 frame, so the user can check the crop before spending a render. `Download 9:16` uses `GET /api/v1/clips/:id/download?reframe=true`. While any render is queued or running, the workspace polls `GET /api/v1/videos/:videoId/renders` every 3 seconds and stops when nothing is active.
+
+Two backend routes were added for this task. `POST /api/v1/videos/:videoId/renders` (`202`) queues a render for each clip of an owned, ready video in timeline order, reusing pending, running or completed renders for unchanged ranges exactly like the single-clip route; it returns `404` for another user's video and `409` when the video is not ready or has no clips. `GET /api/v1/videos/:videoId/renders` returns the newest render of each clip in one request, so the workspace does not need one call per clip. Both live in `RendersService`, and the per-clip queueing logic is shared with `POST /api/v1/clips/:id/renders`.
+
+The workspace also fixes a defect that Task 7.3 would have exposed: `GET /api/v1/videos/:id/processing` returns `RENDER` jobs as well, and the frontend schema only accepted `TRANSCRIPTION`, so a video with a render would have failed to load. The schema now accepts both types, and the Processing Status panel, its polling and the transcription button state only consider transcription jobs.
+
+Unit tests cover the bulk route (order, reuse, ownership, readiness, empty video, queue failure), the per-video listing, the render state rules including stale ranges, the summary counts, the API client calls and the controls for every state. Renders still need the manual Cloudinary check that Task 3.1, Task 4.6 and Task 7.3 track, and a real BullMQ and Redis run to confirm the polling flow end to end.
 
 **7.5 Active speaker tracking (optional)**
 Face detection and speaker detection to follow the person who is talking.
@@ -628,21 +676,102 @@ Acceptance: only started after 7.2 to 7.4 are stable.
 Build subtitle cues from word-level timestamps for each clip, with time offsets relative to the clip start.
 Acceptance: cue timing matches the audio.
 
+#### 8.1 Implementation result (2026-09-29)
+
+Task 5.4 asked for word-level timestamps, but the transcription worker only requested segment timestamps, so no word timing existed to build subtitles from. The worker now requests `word` and `segment` granularities from Groq in one call. Groq returns the words as one flat list per chunk; each word is attached to the segment that contains its midpoint (or the nearest segment within one second), converted from chunk time to absolute video time, rounded to the millisecond and stored in the new nullable `TranscriptSegment.words` JSON column as `[{ word, startSec, endSec }]`. Because words travel with their segment, the existing chunk-overlap handling decides which words are kept and no word can be duplicated across chunks. The migration `20260929190000_transcript_segment_words` adds the column; it was written by hand for the same reason as the Task 7.3 migration, so run `npm --prefix backend run db:migrate` once against a real database to confirm there is no schema drift. `GET /api/v1/videos/:id/transcript` still returns segments only, without words.
+
+`GET /api/v1/clips/:id/subtitles` returns the cues for one clip: `{ clipId, language, startSec, endSec, durationSec, timing, cues: [{ index, startSec, endSec, text }] }`. Cue times are in seconds from the start of the clip, not of the video, and always lie inside `[0, durationSec]`. Ownership is enforced like every other clip route (`404` for another user's clip), and `409` is returned while the video has no transcript. A clip with no speech returns an empty `cues` array.
+
+Cue building (`subtitle-cue-builder.ts`, pure and unit tested) works in these steps:
+
+- A word belongs to the clip when its midpoint is inside the clip range, so a word cut by a clip edge is dropped instead of shown as a fragment. Times are shifted by the clip start and clamped to the clip.
+- A cue starts from the first word's start and ends at the last word's end, so cue timing is exactly the measured audio timing. Words are joined with single spaces and never reordered.
+- A new cue starts on a silence longer than 0.8 s, at 7 words, at 36 characters, at 4 s of duration, after a sentence end (`. ! ? ؟ … ۔`) once the cue holds at least 12 characters, and after a comma-like mark (`, ; : ، ؛`) once the cue is 60% full. The limits suit a 9:16 frame and are constants in `DEFAULT_SUBTITLE_CUE_OPTIONS`; configurable styling remains Task 8.3.
+- Cues never overlap. When two word timings overlap by a few milliseconds, the earlier cue is shortened so the moment a word is first spoken stays exact; cues that would start at the same instant are merged. A cue shorter than 0.4 s is held on screen up to that length only when the next cue or the clip end leaves room.
+
+Transcripts created before this task have no stored words. For those, the segment text is spread over the segment range in proportion to word length and the response reports `timing: "ESTIMATED"` (`"MIXED"` when only some segments lack words, `"WORD"` when all timing is measured, `"NONE"` when the clip has no speech). Estimated cues are only approximate, so re-running transcription on such a video is what satisfies the acceptance criterion for it; the frontend must not present `ESTIMATED` timing as exact.
+
+Unit tests cover the offset, midpoint and clamping rules, every split rule, Arabic text, overlap and merge handling, minimum display time, the estimate fallback, and the service's ownership, missing-transcript, malformed-words and mixed-timing paths. Transcription tests cover the requested granularities, word attachment, and absolute word times after chunk merging. An end-to-end test covers authentication, ownership, the missing-transcript error and the response shape. Measured timing quality still needs a manual check against a real Groq Arabic transcription: play a clip with the cues from this endpoint and confirm they follow the audio. This check joins the pending Task 3.1, Task 4.6 and Task 7.3 manual checks. The style presets, RTL rendering, burn-in toggle and text editing remain Tasks 8.2 to 8.5.
+
 **8.2 Arabic and RTL rendering test**
 Verify font support, letter joining and right-to-left direction in the rendered output before building the full feature.
 Acceptance: a sample clip renders correctly.
+
+#### 8.2 Implementation result (2026-09-29)
+
+Arabic subtitle rendering was verified against real podcast footage on Cloudinary, testing fonts, cursive letter joining, right-to-left sentence direction, bidirectional mixed text (numbers and Latin terms), punctuation alignment, and timed video overlays.
+
+- **Font support**: Google Font `Cairo` renders cleanly with a modern sans-serif aesthetic suited for 9:16 vertical reels; `Amiri` provides traditional Naskh typography; system `Arial` serves as a neutral fallback. `Tahoma` is not available on Cloudinary and returned `400`.
+- **Letter joining & RTL**: Cloudinary's text engine natively handles Arabic glyph shaping and bidirectional layout without requiring pre-shaping libraries. Letters join into correct cursive forms, word order flows right-to-left, mixed Latin acronyms and numbers retain proper reading order, and Arabic punctuation marks (`؟` and `!`) anchor to the end of the clause.
+- **Timed video overlay**: Sequential cues using relative offsets (`so_<start>`, `eo_<end>`) render accurately onto 9:16 reframed MP4 video with custom colors, sizing, background bounding boxes, and safe margin positions. A sample 6-second vertical reel was rendered eagerly and downloaded, verifying stream specs (H.264 video, AAC audio, 720x1280, 24fps) and timed cue transitions.
+
+The complete evaluation and transformation specs are documented in `docs/ARABIC_SUBTITLE_RENDERING.md`. Presets (8.3), burn-in toggle (8.4), and subtitle editing (8.5) will build directly on this tested pipeline.
 
 **8.3 Subtitle styling**
 Configurable font, size, colour, position and background.
 Acceptance: at least three presets available.
 
+#### 8.3 Implementation result (2026-09-29)
+
+A subtitle style has seven properties: `fontFamily` (`Cairo`, `Amiri` or `Arial`, the three fonts verified in Task 8.2; `Tahoma` is rejected because Cloudinary returns `400` for it), `fontSizePx` (an integer from 20 to 72, measured on the 720 px wide reel frame), `bold`, `textColor` and `backgroundColor` (`#rrggbb`), `backgroundOpacity` (0 to 1, where 0 draws no box) and `position` (`TOP`, `MIDDLE` or `BOTTOM`). The model, the presets and the resolver live in `backend/src/subtitles/subtitle-style.ts` and are pure and unit tested.
+
+Four presets are available, all built from the 8.2 findings: `REEL` (Cairo, bold white on a 63% dark box, middle, the default), `HIGHLIGHT` (Cairo, larger bold yellow on an 85% dark box, middle), `CLASSIC` (Amiri, bold white on a 55% soft dark box, bottom) and `MINIMAL` (Arial, regular white with no box, top).
+
+Two routes were added, both behind the global session guard:
+
+- `GET /api/v1/subtitles/styles` returns `{ defaultPresetId, fonts, positions, fontSize: { min, max }, presets: [{ id, label, description, style }] }`, so the frontend never hard codes the choices.
+- `GET /api/v1/subtitles/styles/resolve` takes an optional `preset` plus any of the seven properties as query parameters and returns `{ presetId, style }`: the preset with only the given properties replaced, colors lower cased. An unknown preset, font or position, a size outside 20 to 72 or a fractional size, a color that is not a six digit hex value, an opacity outside 0 to 1, a non boolean `bold` and any unknown query field all return `400` with field level details. Task 8.4 is expected to reuse this validation when a style is attached to a render.
+
+`GET /api/v1/clips/:id/subtitles` is unchanged; styling is kept separate from cues so the cue contract and its tests stay stable.
+
+The video workspace shows a Subtitle style panel once the video has a transcript. It loads the catalog, lists the presets as a radio group, and offers controls for font, size, bold, text color, background color, background opacity and position, with a "Reset to preset" button that appears only after the style differs from its preset. A 9:16 preview draws sample text with the chosen style; the size is scaled from the 720 px reel width using container query units so the preview matches the proportions of the final frame. The preview text is English because the repository forbids Arabic text (section 7.1); the fonts themselves are loaded with `next/font` including their Arabic subsets. The current selection is saved in the browser's local storage and validated against the catalog on load, so a stale or edited value falls back to the default preset instead of breaking the panel.
+
+Nothing is stored on the server and no style reaches Cloudinary yet: choosing where a style is saved for a clip, mapping it to the text layer syntax from `docs/ARABIC_SUBTITLE_RENDERING.md` and burning it into a render are Task 8.4, and editing cue text is Task 8.5. Unit tests cover the presets (count, uniqueness, valid values), the resolver, every validation rule through the end-to-end suite, the frontend selection helpers, storage recovery and the panel controls. The preview colors and sizes still need a visual check in a browser next to a real render from Task 8.4.
+
 **8.4 Toggle and rendering**
 A per-clip and global toggle to burn subtitles into the output.
 Acceptance: the same clip can be rendered with and without subtitles.
 
+#### 8.4 Implementation result (2026-09-29)
+
+A render can now carry burned-in subtitles. `POST /api/v1/clips/:id/renders` and `POST /api/v1/videos/:videoId/renders` accept an optional body: `subtitles` (boolean), plus the same `preset` and seven style properties as `GET /api/v1/subtitles/styles/resolve`. The body is validated by `CreateRenderDto`, which extends the Task 8.3 query DTO, so the validation rules are shared. An empty body renders without subtitles exactly as before. A style sent without `subtitles: true` returns `400`, and `subtitles: true` without a transcript returns `409`.
+
+When subtitles are on, `RendersService` resolves the style, builds the cues for the render range with `SubtitlesService.buildCues` and stores both on the new `ClipRender` columns `subtitleStyle` and `subtitleCues`, together with `subtitleKey`, a SHA-256 hash of the style and cues. Storing a snapshot means the worker, retries and downloads always reproduce what the user asked for, even if the style or transcript changes later. A render is reused only when the range and the `subtitleKey` both match, so the same clip can exist with and without subtitles at the same time. `GET /api/v1/videos/:videoId/renders` returns the newest render of each clip and variant, and every render now reports `subtitles` and `subtitleStyle`. Retrying a failed subtitled render rebuilds its cues for the clip's current range.
+
+`subtitle-overlay.ts` maps a style and cues to Cloudinary transformation components: one text layer per cue with `start_offset` and `end_offset` relative to the clip, each with `text_align: center`, followed by a `layer_apply` placement at the top, middle or bottom with a 120 px margin on the 720 px reference frame. Font sizes are scaled to the 1080 px output width, the background alpha comes from `backgroundOpacity` (no background at 0), and text is normalised before encoding. The layers are appended after the 9:16 reframe in `StorageService`, for both the eager render and the download URL. Subtitles are ignored on output that is not reframed, because the style sizes are calibrated for the reel frame.
+
+`GET /api/v1/renders/:id/download` returns a download URL built from the stored snapshot, named `clip-<id>-9x16-subtitled` or `clip-<id>-9x16`. It returns `404` for another user's render and `409` until the render has completed.
+
+A clip with a lot of speech produces one text layer per cue, which would make the delivery URL too long. The layers are therefore stored once as a Cloudinary named transformation (`subs_<hash>`, created through the Admin API by `StorageService.ensureSubtitleTransformation` before the render is requested and before a download URL is built), and the URL only carries that short name. The name is a hash of the generated layer string, so identical subtitles reuse the same transformation and creating it again is ignored when Cloudinary answers `409`. The old `MAX_SUBTITLE_OVERLAY_LENGTH` guard and its `400` are removed. Cloudinary's limit on the size of a named transformation has not been measured, so a very long clip still needs a manual check. A subtitles overlay from an uploaded SRT file (`l_subtitles`) was tried and rejected: it split Arabic words and did not shape the letters.
+
+Each text layer is centered (`text_align: center`) and wrapped to 90% of the frame width, so a line with a single word is centered on its own.
+
+The video workspace has a "Burn in subtitles" checkbox on every clip and one for all clips. The global choice is remembered in local storage, clip choices last for the session, and changing the global toggle clears the per-clip choices. "Render all clips" uses the bulk route when no clip differs and otherwise queues each clip with its own setting. The controls pick the render that matches the current variant and style, so a clip shows as "Not rendered" until it has been rendered with the selected setting. Preview and download use the subtitled render when it is ready. The toggles are disabled until the video has a transcript.
+
+Unit tests cover the overlay builder, the stored-data reader, the DTO validation, the storage transformation for eager renders and downloads, the executor, and the service paths for reuse per variant, key changes, missing transcript, bulk rendering, downloads and retry. Frontend tests cover the API bodies, variant matching and merging, the burn-in settings and the toggles. The migration `20260929200000_clip_render_subtitles` was written by hand and the Prisma client was regenerated with a stub schema engine because the sandbox could not download Prisma's engines, so run `npm --prefix backend run db:migrate` once against a real database to confirm there is no schema drift. A real subtitled render on Cloudinary was not run: render one clip with and without subtitles, confirm the text follows the audio, and compare the text size and position with the style preview from Task 8.3. This joins the pending Task 3.1, Task 4.6 and Task 7.3 manual checks. Editing cue text remains Task 8.5.
+
 **8.5 Subtitle editing**
 Let the user correct subtitle text before rendering.
 Acceptance: edited text is used in the final render.
+
+#### 8.5 Implementation result (2026-09-29)
+
+The user can correct the text of any subtitle line of a clip before rendering, and the corrected text is what gets burned into the video. Timing is never edited: a correction changes the words of a line, not when it appears.
+
+`POST /api/v1/clips/:id/renders` accepts an optional `subtitleEdits` list next to `subtitles: true`, where each item is `{ index, text }`. `index` is the 1-based cue number returned by `GET /api/v1/clips/:id/subtitles` and `text` is at most 200 characters. The server rebuilds the cues for the render range from the transcript and applies the edits on top of them, so the client can never change cue timing or send cues of its own. The rules are enforced by `applySubtitleEdits` (`backend/src/subtitles/subtitle-edits.ts`, pure and unit tested):
+
+- Text is normalised exactly like burned-in text (control characters and repeated whitespace collapse, ends are trimmed).
+- An edit that leaves the normalised text unchanged is dropped, so it never creates a separate render.
+- An empty text hides the line: the cue is removed from the render and the edit is stored as an empty string.
+- An index that does not exist for the clip, or the same index twice, returns `400`. `subtitleEdits` without `subtitles: true` also returns `400`, and the whole video route `POST /api/v1/videos/:videoId/renders` does not accept the field, because edits belong to one clip.
+
+The edited cues become the render snapshot from Task 8.4: they are stored in `ClipRender.subtitleCues`, hashed into `subtitleKey`, and used by the worker and by `GET /api/v1/renders/:id/download`, so the final video and its download always contain the edited text. Because the key covers the text, the same clip can exist as an unedited render and as differently edited renders at the same time, and an identical request reuses the existing render. The edits that were applied are kept in the new nullable column `ClipRender.subtitleEdits` and returned as `subtitleEdits` (an empty list when there are none) by every render response, so the frontend can tell which render carries which text.
+
+Retrying a failed render rebuilds its cues for the clip's current range as before. When the range is unchanged, the stored edits are applied again (an edit whose cue no longer exists is skipped instead of failing the retry). When the range changed, the edits are cleared, because cue numbers belong to the old range.
+
+The video workspace shows a `Subtitle text` section under every clip that has subtitle burn-in turned on. `Edit subtitle text` loads the clip's cues, lists each line with its time range and lets the user edit or clear it (text fields use automatic direction, so Arabic lines are right to left). `Apply text changes` commits the corrections, `Discard changes` restores the applied state and `Reset to transcript` removes every correction. The clip then shows `Not rendered` until it is rendered again, because a render only counts for a clip when its style and its edits match the current ones. Corrections are kept for the session and are dropped automatically when the clip's range changes. `Render all clips (9:16)` uses the whole video route only when no clip has corrections and otherwise renders each clip with its own text. Clips with estimated timing show a notice that the timing is approximate.
+
+Unit tests cover the edit rules, the DTO validation (including rejecting the field on the whole video route), the stored snapshot, the render key, reuse of identical edits, the retry rules, the API client bodies, the variant matching and the editor component states (loading, error and retry, no speech, estimated timing, apply, discard, reset and hide). The migration `20260929210000_clip_render_subtitle_edits` was written by hand and the Prisma client was regenerated with a stub schema engine because the sandbox could not download Prisma's engines, so run `npm --prefix backend run db:migrate` once against a real database to confirm there is no schema drift. A real render with edited text on Cloudinary was not run: edit a line, render the clip, and confirm the burned-in text and the downloaded file show the correction. This joins the pending Task 3.1, Task 4.6, Task 7.3 and Task 8.4 manual checks.
 
 ### Phase 9: Subscriptions and Production
 
@@ -670,15 +799,15 @@ Acceptance: production checklist completed.
 
 ## 9. Known Risks
 
-| Risk | Mitigation |
-|------|------------|
+| Risk                                             | Mitigation                                                                              |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------- |
 | Cloudinary free plan file size and credit limits | Test with a real one-hour video in Phase 3.1, plan for a paid tier before public launch |
-| Groq audio file size limit | Compress audio and chunk it (Phase 5.2 and 5.3) |
-| Groq free tier token and rate limits | Windowing, backoff and per-user limits (Phase 5.5 and 6.2) |
-| Arabic dialect transcription errors | Set language explicitly, allow manual transcript and subtitle edits |
-| AI produces invalid or overlapping segments | Strict schema validation and reconciliation (Phase 6.3 and 6.4) |
-| Long-running work timing out | All heavy work runs in queue workers, never in HTTP requests |
-| Free AI does not scale with paying users | Usage limits from Phase 4.2, paid capacity in Phase 9.4 |
+| Groq audio file size limit                       | Compress audio and chunk it (Phase 5.2 and 5.3)                                         |
+| Groq free tier token and rate limits             | Windowing, backoff and per-user limits (Phase 5.5 and 6.2)                              |
+| Arabic dialect transcription errors              | Set language explicitly, allow manual transcript and subtitle edits                     |
+| AI produces invalid or overlapping segments      | Strict schema validation and reconciliation (Phase 6.3 and 6.4)                         |
+| Long-running work timing out                     | All heavy work runs in queue workers, never in HTTP requests                            |
+| Free AI does not scale with paying users         | Usage limits from Phase 4.2, paid capacity in Phase 9.4                                 |
 
 ---
 
@@ -703,12 +832,12 @@ Acceptance: production checklist completed.
 
 ### Useful commands
 
-| Command | Description |
-|---------|-------------|
-| `npm run check` | Lint, type check and format check for both apps (also runs as the pre-commit hook) |
-| `npm test` | Backend unit and end-to-end tests |
-| `npm --prefix backend run db:migrate` | Create and apply a development migration |
-| `npm --prefix backend run db:generate` | Regenerate the Prisma client |
+| Command                                | Description                                                                        |
+| -------------------------------------- | ---------------------------------------------------------------------------------- |
+| `npm run check`                        | Lint, type check and format check for both apps (also runs as the pre-commit hook) |
+| `npm test`                             | Backend unit and end-to-end tests                                                  |
+| `npm --prefix backend run db:migrate`  | Create and apply a development migration                                           |
+| `npm --prefix backend run db:generate` | Regenerate the Prisma client                                                       |
 
 The Prisma client is generated into `backend/src/generated/prisma` and is not committed. It is regenerated by `db:migrate`, `db:generate` and `npm run build`.
 
@@ -716,42 +845,45 @@ The Prisma client is generated into `backend/src/generated/prisma` and is not co
 
 Backend (`backend/.env`):
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `NODE_ENV` | no | `development`, `test` or `production` (default `development`) |
-| `PORT` | no | API port (default `4000`) |
-| `DATABASE_URL` | yes | PostgreSQL connection string |
-| `REDIS_URL` | yes | Redis connection string for BullMQ |
-| `CORS_ORIGIN` | yes | Comma-separated list of allowed frontend origins |
-| `JWT_ACCESS_SECRET` | yes | Secret for signing access tokens (at least 32 characters) |
-| `ACCESS_TOKEN_TTL_SEC` | no | Access token lifetime in seconds (default `900`) |
-| `REFRESH_TOKEN_TTL_SEC` | no | Refresh token and session lifetime in seconds (default `2592000`) |
-| `AUTH_RATE_LIMIT_TTL_SEC` | no | Rate limit window for auth routes in seconds (default `60`) |
-| `AUTH_RATE_LIMIT_MAX` | no | Requests allowed per window, per client and per route (default `10`) |
-| `CLOUDINARY_CLOUD_NAME` | yes | Cloudinary cloud name |
-| `CLOUDINARY_API_KEY` | yes | Cloudinary API key |
-| `CLOUDINARY_API_SECRET` | yes | Cloudinary API secret (server only) |
-| `CLOUDINARY_UPLOAD_PRESET` | no | Optional upload preset name; when set it is included in the signature |
-| `CLOUDINARY_UPLOAD_FOLDER` | no | Folder for uploaded videos (default `podcast-reels`) |
-| `GROQ_API_KEY` | yes | Groq API key for transcription and future topic segmentation |
-| `GROQ_SEGMENTATION_MODEL` | no | Groq structured-output model for topic segmentation (default `openai/gpt-oss-20b`) |
-| `SEGMENTATION_WINDOW_MAX_CHARS` | no | Maximum transcript characters sent in one topic-analysis window (default `12000`) |
-| `SEGMENTATION_WINDOW_OVERLAP_SEC` | no | Earlier transcript context retained between topic-analysis windows in seconds (default `30`) |
-| `SEGMENTATION_MAX_COMPLETION_TOKENS` | no | Completion token cap for each topic-analysis request; keeps reasoning models from exhausting the output budget (default `3000`) |
-| `SEGMENTATION_CONCURRENCY` | no | Number of transcript windows analysed in parallel; keep at `1` on low Groq rate-limit tiers (default `1`) |
-| `SEGMENTATION_VALIDATION_MAX_ATTEMPTS` | no | Number of invalid topic-analysis responses retried before failing (default `3`) |
-| `VIDEO_ALLOWED_FORMATS` | no | Comma-separated extensions allowed for video uploads (default `mp4,mov,webm`) |
-| `VIDEO_MAX_SIZE_BYTES` | no | Largest accepted video file in bytes (default `5368709120`, 5 GiB) |
-| `VIDEO_MAX_DURATION_SEC` | no | Longest accepted video duration in seconds (default `14400`, 4 hours) |
-| `CLIP_MIN_DURATION_SEC` | no | Shortest allowed clip duration in seconds (default `5`) |
-| `CLIP_MAX_DURATION_SEC` | no | Longest allowed clip duration in seconds (default `180`) |
-| `STALE_UPLOAD_THRESHOLD_SEC` | no | Age after which an incomplete upload is abandoned (default `86400`, 24 hours) |
-| `STALE_UPLOAD_CLEANUP_INTERVAL_SEC` | no | Frequency for the stale-upload cleanup job (default `3600`, 1 hour) |
+| Variable                               | Required | Description                                                                                                                     |
+| -------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                             | no       | `development`, `test` or `production` (default `development`)                                                                   |
+| `PORT`                                 | no       | API port (default `4000`)                                                                                                       |
+| `DATABASE_URL`                         | yes      | PostgreSQL connection string                                                                                                    |
+| `REDIS_URL`                            | yes      | Redis connection string for BullMQ                                                                                              |
+| `CORS_ORIGIN`                          | yes      | Comma-separated list of allowed frontend origins                                                                                |
+| `JWT_ACCESS_SECRET`                    | yes      | Secret for signing access tokens (at least 32 characters)                                                                       |
+| `ACCESS_TOKEN_TTL_SEC`                 | no       | Access token lifetime in seconds (default `900`)                                                                                |
+| `REFRESH_TOKEN_TTL_SEC`                | no       | Refresh token and session lifetime in seconds (default `2592000`)                                                               |
+| `AUTH_RATE_LIMIT_TTL_SEC`              | no       | Rate limit window for auth routes in seconds (default `60`)                                                                     |
+| `AUTH_RATE_LIMIT_MAX`                  | no       | Requests allowed per window, per client and per route (default `10`)                                                            |
+| `CLOUDINARY_CLOUD_NAME`                | yes      | Cloudinary cloud name                                                                                                           |
+| `CLOUDINARY_API_KEY`                   | yes      | Cloudinary API key                                                                                                              |
+| `CLOUDINARY_API_SECRET`                | yes      | Cloudinary API secret (server only)                                                                                             |
+| `CLOUDINARY_UPLOAD_PRESET`             | no       | Optional upload preset name; when set it is included in the signature                                                           |
+| `CLOUDINARY_UPLOAD_FOLDER`             | no       | Folder for uploaded videos (default `podcast-reels`)                                                                            |
+| `GROQ_API_KEY`                         | yes      | Groq API key for transcription and future topic segmentation                                                                    |
+| `GROQ_SEGMENTATION_MODEL`              | no       | Groq structured-output model for topic segmentation (default `openai/gpt-oss-20b`)                                              |
+| `SEGMENTATION_WINDOW_MAX_CHARS`        | no       | Maximum transcript characters sent in one topic-analysis window (default `12000`)                                               |
+| `SEGMENTATION_WINDOW_OVERLAP_SEC`      | no       | Earlier transcript context retained between topic-analysis windows in seconds (default `30`)                                    |
+| `SEGMENTATION_MAX_COMPLETION_TOKENS`   | no       | Completion token cap for each topic-analysis request; keeps reasoning models from exhausting the output budget (default `3000`) |
+| `SEGMENTATION_CONCURRENCY`             | no       | Number of transcript windows analysed in parallel; keep at `1` on low Groq rate-limit tiers (default `1`)                       |
+| `SEGMENTATION_MONTHLY_RUN_LIMIT`       | no       | AI segmentation runs allowed per user per UTC month (default `20`)                                                              |
+| `SEGMENTATION_VALIDATION_MAX_ATTEMPTS` | no       | Number of invalid topic-analysis responses retried before failing (default `3`)                                                 |
+| `RENDER_POLL_INTERVAL_MS`              | no       | Delay between checks for a finished reel render in milliseconds (default `3000`)                                                |
+| `RENDER_TIMEOUT_MS`                    | no       | Time a render may take before the job fails and can be retried, in milliseconds (default `300000`)                              |
+| `VIDEO_ALLOWED_FORMATS`                | no       | Comma-separated extensions allowed for video uploads (default `mp4,mov,webm`)                                                   |
+| `VIDEO_MAX_SIZE_BYTES`                 | no       | Largest accepted video file in bytes (default `5368709120`, 5 GiB)                                                              |
+| `VIDEO_MAX_DURATION_SEC`               | no       | Longest accepted video duration in seconds (default `14400`, 4 hours)                                                           |
+| `CLIP_MIN_DURATION_SEC`                | no       | Shortest allowed clip duration in seconds (default `5`)                                                                         |
+| `CLIP_MAX_DURATION_SEC`                | no       | Longest allowed clip duration in seconds (default `180`)                                                                        |
+| `STALE_UPLOAD_THRESHOLD_SEC`           | no       | Age after which an incomplete upload is abandoned (default `86400`, 24 hours)                                                   |
+| `STALE_UPLOAD_CLEANUP_INTERVAL_SEC`    | no       | Frequency for the stale-upload cleanup job (default `3600`, 1 hour)                                                             |
 
 Frontend (`frontend/.env.local`):
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `NEXT_PUBLIC_API_URL` | yes | Base URL of the API, including `/api/v1` |
+| Variable              | Required | Description                              |
+| --------------------- | -------- | ---------------------------------------- |
+| `NEXT_PUBLIC_API_URL` | yes      | Base URL of the API, including `/api/v1` |
 
 Both apps validate their environment at startup and refuse to run when a required value is missing or invalid.

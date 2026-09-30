@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import type {
   ProcessingJob,
   ProcessingJobStatus,
@@ -89,6 +93,23 @@ export class ProcessingJobsService {
       failedAt: new Date(),
       lastError: message,
     });
+  }
+
+  async retryJob(id: string): Promise<ProcessingJob> {
+    const job = await this.getById(id);
+    if (job.status !== 'FAILED') {
+      throw new ConflictException('Only failed jobs can be retried');
+    }
+
+    const reset = await this.updateStatus(id, 'PENDING', {
+      progress: 0,
+      lastError: null,
+      startedAt: null,
+      completedAt: null,
+      failedAt: null,
+    });
+    await this.queue.ensureQueued({ processingJobId: id, type: job.type });
+    return reset;
   }
 
   async recoverPersistedJobs(): Promise<number> {

@@ -126,6 +126,7 @@ describe('ClipsService.create', () => {
       updatedAt: new Date(),
     });
     const clip = {
+      deleteMany: jest.fn(),
       createManyAndReturn: jest
         .fn()
         .mockResolvedValue([
@@ -134,7 +135,8 @@ describe('ClipsService.create', () => {
         ]),
     };
     const usageRecord = { upsert: jest.fn().mockResolvedValue(undefined) };
-    const transaction = { clip, usageRecord };
+    const segmentationRun = { create: jest.fn().mockResolvedValue({}) };
+    const transaction = { clip, usageRecord, segmentationRun };
     const service = new ClipsService(
       {
         video,
@@ -172,6 +174,125 @@ describe('ClipsService.create', () => {
     expect(usageRecord.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ update: { clipCount: { increment: 2 } } }),
     );
+    expect(segmentationRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'user-1',
+        videoId: 'video-1',
+        clipCount: 2,
+        replacedClipCount: 0,
+        segments: [
+          {
+            title: 'Introduction',
+            startSec: 0,
+            endSec: 30,
+            summary: 'Start.',
+          },
+          { title: 'Conclusion', startSec: 30, endSec: 60, summary: 'End.' },
+        ],
+      }) as unknown,
+    });
+    expect(clip.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('replaces only untouched AI clips and records the replacement in the stored run', async () => {
+    const video = { findFirst: jest.fn().mockResolvedValue(readyVideo) };
+    const clip = {
+      deleteMany: jest.fn().mockResolvedValue({ count: 4 }),
+      createManyAndReturn: jest.fn().mockResolvedValue([
+        {
+          id: 'clip-9',
+          videoId: 'video-1',
+          title: 'Introduction',
+          startSec: 0,
+          endSec: 60,
+          source: 'AI',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        },
+      ]),
+    };
+    const usageRecord = { upsert: jest.fn().mockResolvedValue(undefined) };
+    const segmentationRun = { create: jest.fn().mockResolvedValue({}) };
+    const transaction = { clip, usageRecord, segmentationRun };
+    const service = new ClipsService(
+      {
+        video,
+        clip,
+        usageRecord,
+        $transaction: jest.fn(
+          (callback: (client: typeof transaction) => Promise<unknown>) =>
+            callback(transaction),
+        ),
+      } as unknown as PrismaService,
+      {
+        get: (key: 'CLIP_MIN_DURATION_SEC' | 'CLIP_MAX_DURATION_SEC') =>
+          key === 'CLIP_MIN_DURATION_SEC' ? 5 : 180,
+      } as ConfigService<Env, true>,
+      {} as StorageService,
+    );
+
+    await service.createAiSuggestions(
+      'user-1',
+      'video-1',
+      [{ title: 'Introduction', startSec: 0, endSec: 60, summary: 'Start.' }],
+      { replaceExisting: true },
+    );
+
+    expect(clip.deleteMany).toHaveBeenCalledWith({
+      where: { videoId: 'video-1', source: 'AI' },
+    });
+    expect(segmentationRun.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        clipCount: 1,
+        replacedClipCount: 4,
+      }) as unknown,
+    });
+  });
+});
+
+describe('ClipsService AI run helpers', () => {
+  it('counts AI clips only for an owned ready video', async () => {
+    const clip = { count: jest.fn().mockResolvedValue(3) };
+
+    await expect(
+      createService({
+        video: { findFirst: jest.fn().mockResolvedValue(readyVideo) },
+        clip,
+      }).countAiClips('user-1', 'video-1'),
+    ).resolves.toBe(3);
+    expect(clip.count).toHaveBeenCalledWith({
+      where: { videoId: 'video-1', source: 'AI' },
+    });
+
+    await expect(
+      createService({
+        video: { findFirst: jest.fn().mockResolvedValue(null) },
+        clip,
+      }).countAiClips('user-2', 'video-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('lists stored AI runs newest first for the owner only', async () => {
+    const segmentationRun = { findMany: jest.fn().mockResolvedValue([]) };
+
+    await createService({
+      video: { findFirst: jest.fn().mockResolvedValue(readyVideo) },
+      segmentationRun,
+    }).listAiRuns('user-1', 'video-1');
+
+    expect(segmentationRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { videoId: 'video-1', userId: 'user-1' },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    );
+    await expect(
+      createService({
+        video: { findFirst: jest.fn().mockResolvedValue(null) },
+        segmentationRun,
+      }).listAiRuns('user-2', 'video-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
 
@@ -216,13 +337,69 @@ describe('ClipsService ownership and updates', () => {
       'podcast-reels/uploads/user-1/video-1',
       10,
       30,
+      {},
     );
     expect(storage.getClipDownloadUrl).toHaveBeenCalledWith(
       'podcast-reels/uploads/user-1/video-1',
       10,
       30,
       'clip-clip-1',
+      {},
     );
+  });
+
+  it('requests reframed playback and a 9x16 download filename when reframe is set', async () => {
+    const clip = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'clip-1',
+        startSec: 10,
+        endSec: 30,
+        video: { cloudinaryId: 'podcast-reels/uploads/user-1/video-1' },
+      }),
+    };
+    const storage = {
+      getClipPlaybackUrl: jest.fn().mockReturnValue('https://reel-preview'),
+      getClipDownloadUrl: jest.fn().mockReturnValue('https://reel-download'),
+    };
+    const service = createService({ clip }, storage);
+
+    await expect(
+      service.getPlaybackUrl('user-1', 'clip-1', { reframe: true }),
+    ).resolves.toBe('https://reel-preview');
+    await expect(
+      service.getDownloadUrl('user-1', 'clip-1', { reframe: true }),
+    ).resolves.toBe('https://reel-download');
+    expect(storage.getClipPlaybackUrl).toHaveBeenCalledWith(
+      'podcast-reels/uploads/user-1/video-1',
+      10,
+      30,
+      { reframe: true },
+    );
+    expect(storage.getClipDownloadUrl).toHaveBeenCalledWith(
+      'podcast-reels/uploads/user-1/video-1',
+      10,
+      30,
+      'clip-clip-1-9x16',
+      { reframe: true },
+    );
+  });
+
+  it('never builds a reframed URL for a clip the user does not own', async () => {
+    const clip = { findFirst: jest.fn().mockResolvedValue(null) };
+    const storage = {
+      getClipPlaybackUrl: jest.fn(),
+      getClipDownloadUrl: jest.fn(),
+    };
+    const service = createService({ clip }, storage);
+
+    await expect(
+      service.getPlaybackUrl('user-2', 'clip-1', { reframe: true }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(
+      service.getDownloadUrl('user-2', 'clip-1', { reframe: true }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(storage.getClipPlaybackUrl).not.toHaveBeenCalled();
+    expect(storage.getClipDownloadUrl).not.toHaveBeenCalled();
   });
 
   it('revalidates the full range when a clip is updated', async () => {
