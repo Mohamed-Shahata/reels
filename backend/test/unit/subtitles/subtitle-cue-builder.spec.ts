@@ -362,3 +362,58 @@ describe('estimateWordTimings', () => {
     );
   });
 });
+
+describe('buildSubtitleCues in word mode', () => {
+  it('shows one word per cue', () => {
+    const cues = buildSubtitleCues(
+      run(['one', 'two', 'three'], 0, 0.4),
+      0,
+      10,
+      {},
+      'WORD',
+    );
+
+    expect(cues.map((cue) => cue.text)).toEqual(['one', 'two', 'three']);
+    expect(cues.map((cue) => cue.index)).toEqual([1, 2, 3]);
+  });
+
+  it('keeps a word on screen until the next one starts when the speaker does not pause', () => {
+    const cues = buildSubtitleCues(
+      [word('one', 0, 0.3), word('two', 0.5, 0.8), word('three', 3, 3.3)],
+      0,
+      10,
+      {},
+      'WORD',
+    );
+
+    expect(cues[0]).toMatchObject({ startSec: 0, endSec: 0.5 });
+    // A real pause ends the word when it was spoken.
+    expect(cues[1]).toMatchObject({ startSec: 0.5, endSec: 0.8 });
+    expect(cues[2]).toMatchObject({ startSec: 3, endSec: 3.3 });
+  });
+
+  it('never overlaps cues and stays inside the clip', () => {
+    const cues = buildSubtitleCues(
+      run(['a', 'b', 'c', 'd', 'e'], 4, 0.05),
+      5,
+      20,
+      {},
+      'WORD',
+    );
+
+    cues.forEach((cue, position) => {
+      expect(cue.startSec).toBeGreaterThanOrEqual(0);
+      expect(cue.endSec).toBeLessThanOrEqual(15);
+      if (position > 0) {
+        expect(cue.startSec).toBeGreaterThanOrEqual(cues[position - 1].endSec);
+      }
+    });
+  });
+
+  it('still groups words into phrases by default', () => {
+    const cues = buildSubtitleCues(run(['one', 'two', 'three'], 0, 0.4), 0, 10);
+
+    expect(cues).toHaveLength(1);
+    expect(cues[0].text).toBe('one two three');
+  });
+});

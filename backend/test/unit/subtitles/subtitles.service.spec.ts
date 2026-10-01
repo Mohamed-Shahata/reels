@@ -109,6 +109,7 @@ describe('SubtitlesService.getClipSubtitles', () => {
     expect(result).toEqual({
       clipId: 'clip-1',
       language: 'ar',
+      displayMode: 'PHRASE',
       startSec: 100,
       endSec: 110,
       durationSec: 10,

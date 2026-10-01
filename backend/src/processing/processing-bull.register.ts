@@ -11,6 +11,7 @@ import { ProcessingJobsService } from './processing-jobs.service';
 import { ProcessingProcessor } from './processing.processor';
 import { ProcessingStartupService } from './processing-startup.service';
 import { ProcessingModule } from './processing.module';
+import { ClipsModule } from '../clips/clips.module';
 import { RendersModule } from '../renders/renders.module';
 import { TranscriptionModule } from '../transcription/transcription.module';
 
@@ -21,6 +22,7 @@ export function buildProcessingBullModule(): DynamicModule {
     imports: [
       TranscriptionModule,
       RendersModule,
+      ClipsModule,
       BullModule.forRootAsync({
         inject: [ConfigService],
         useFactory: (config: ConfigService<Env, true>) => ({

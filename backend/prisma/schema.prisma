@@ -63,6 +63,8 @@ model Video {
   durationSec  Float?
   sizeBytes    BigInt?
   status       VideoStatus @default(UPLOADING)
+  language     String      @default("ar")
+  autoClips    Boolean     @default(false)
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)

@@ -34,28 +34,3 @@ export function validateVideoDuration(
 
   return null;
 }
-
-export function readVideoDuration(file: File): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    const objectUrl = URL.createObjectURL(file);
-
-    const cleanup = () => {
-      URL.revokeObjectURL(objectUrl);
-      video.removeAttribute('src');
-      video.load();
-    };
-
-    video.preload = 'metadata';
-    video.onloadedmetadata = () => {
-      const duration = video.duration;
-      cleanup();
-      resolve(duration);
-    };
-    video.onerror = () => {
-      cleanup();
-      reject(new Error('This video metadata could not be read.'));
-    };
-    video.src = objectUrl;
-  });
-}

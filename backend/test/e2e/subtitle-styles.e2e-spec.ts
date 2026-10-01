@@ -70,6 +70,10 @@ describe('subtitle styles (e2e)', () => {
       );
       expect(body.fonts).toEqual(['Cairo', 'Amiri', 'Arial']);
       expect(body.positions).toEqual(['TOP', 'MIDDLE', 'BOTTOM']);
+      expect((body as { displayModes?: string[] }).displayModes).toEqual([
+        'PHRASE',
+        'WORD',
+      ]);
       expect(body.fontSize).toEqual({ min: 20, max: 72 });
     });
   });
@@ -91,7 +95,11 @@ describe('subtitle styles (e2e)', () => {
 
       expect(response.body).toMatchObject({
         presetId: 'REEL',
-        style: { fontFamily: 'Cairo', position: 'BOTTOM' },
+        style: {
+          fontFamily: 'Cairo',
+          position: 'MIDDLE',
+          displayMode: 'PHRASE',
+        },
       });
     });
 
@@ -122,8 +130,33 @@ describe('subtitle styles (e2e)', () => {
           backgroundColor: '#000000',
           backgroundOpacity: 0.4,
           position: 'MIDDLE',
+          displayMode: 'PHRASE',
         },
       });
+    });
+
+    it('lets the caller switch to word by word subtitles', async () => {
+      const cookies = await registerAndLogin();
+
+      const response = await request(app.getHttpServer())
+        .get('/api/v1/subtitles/styles/resolve')
+        .query({ displayMode: 'WORD' })
+        .set('Cookie', cookies)
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        style: { displayMode: 'WORD' },
+      });
+    });
+
+    it('rejects an unknown display mode', async () => {
+      const cookies = await registerAndLogin();
+
+      await request(app.getHttpServer())
+        .get('/api/v1/subtitles/styles/resolve')
+        .query({ displayMode: 'LETTER' })
+        .set('Cookie', cookies)
+        .expect(400);
     });
 
     it.each([

@@ -243,7 +243,7 @@ Registration rules: `email` is trimmed, lowercased and must be a valid address (
 | `/videos/new`  | Upload screen with progress, pause, resume and retry  |
 | `/videos/[id]` | Video player, timeline, clip creation form, clip list |
 
-The clipping screen must support: entering start and end time as `mm:ss`, setting start or end from the current playhead position, previewing the range before saving, and editing or deleting existing clips.
+The clipping screen must support: entering start and end time as `mm:ss`, previewing the range before saving, and editing or deleting existing clips.
 
 ---
 
@@ -447,7 +447,7 @@ Player page with seeking, current time display, and a timeline showing existing 
 Acceptance: the user can navigate a one-hour video smoothly.
 
 **3.5 Clip creation UI**
-Start and end inputs in `mm:ss`, buttons to set start or end from the playhead, range preview, title field, save.
+Start and end inputs in `mm:ss` that apply as you type, range preview, title field, save.
 Acceptance: a clip can be created in under 15 seconds from a known timestamp.
 
 **3.6 Clip management UI**
@@ -876,7 +876,9 @@ Backend (`backend/.env`):
 | `VIDEO_MAX_SIZE_BYTES`                 | no       | Largest accepted video file in bytes (default `5368709120`, 5 GiB)                                                              |
 | `VIDEO_MAX_DURATION_SEC`               | no       | Longest accepted video duration in seconds (default `14400`, 4 hours)                                                           |
 | `CLIP_MIN_DURATION_SEC`                | no       | Shortest allowed clip duration in seconds (default `5`)                                                                         |
-| `CLIP_MAX_DURATION_SEC`                | no       | Longest allowed clip duration in seconds (default `180`)                                                                        |
+| `CLIP_MAX_DURATION_SEC`                | no       | Longest allowed clip duration in seconds (default `240`)                                                                        |
+| `AI_CLIP_MIN_DURATION_SEC`             | no       | Shortest clip the AI planner produces, in seconds (default `60`)                                                                |
+| `AI_CLIP_MAX_DURATION_SEC`             | no       | Longest clip the AI planner produces before splitting a topic into parts; capped by `CLIP_MAX_DURATION_SEC` (default `240`)     |
 | `STALE_UPLOAD_THRESHOLD_SEC`           | no       | Age after which an incomplete upload is abandoned (default `86400`, 24 hours)                                                   |
 | `STALE_UPLOAD_CLEANUP_INTERVAL_SEC`    | no       | Frequency for the stale-upload cleanup job (default `3600`, 1 hour)                                                             |
 
@@ -887,3 +889,25 @@ Frontend (`frontend/.env.local`):
 | `NEXT_PUBLIC_API_URL` | yes      | Base URL of the API, including `/api/v1` |
 
 Both apps validate their environment at startup and refuse to run when a required value is missing or invalid.
+
+---
+
+## AI clip modes, planner and word-by-word subtitles
+
+`POST /api/v1/videos/:videoId/ai-clips` accepts an optional `mode`:
+
+- `FULL` (default): cuts the whole episode into back-to-back clips that follow its topics.
+- `HIGHLIGHTS`: keeps only the moments most likely to get reach and leaves the rest of the episode out. The model scores each moment from 1 to 10; `ClipPlannerService` drops overlapping moments from neighbouring windows (higher score wins), keeps moments scoring 6 or more (at least 3 are kept when available) and limits the count by episode length (about one per five minutes, between 3 and 20). It returns `409` when nothing stands out. Highlights are not contiguous, so the episode has gaps between them.
+
+In the workspace, "Auto-generate" / "Re-run AI clips" opens a popup where the user chooses "The whole podcast" or "Important parts only". Existing AI clips are replaced only after the user confirms there.
+
+Clip length and cut points (both modes), in `segmentation/clip-planner.service.ts`:
+
+- Clips last `AI_CLIP_MIN_DURATION_SEC` to `AI_CLIP_MAX_DURATION_SEC` (60 to 240 seconds by default). `CLIP_MAX_DURATION_SEC` now defaults to 240 so these clips are valid; the frontend Trim panel uses the same 240 second limit.
+- A clip only starts or ends in silence. Cut points are the ends of transcript segments (after the last word, a short pad that never exceeds half of the silence) and pauses of 0.7 seconds or more between words. Sentence ends and longer silences are preferred; when the transcript has no punctuation, a silence of 0.5 seconds or more counts as a sentence end.
+- `FULL`: topic edges move to the nearest cut point; a topic shorter than the minimum joins a neighbour, or borrows time from one that is too long to join; a topic longer than the maximum is split into equal parts at sentence ends and titled `(Part n)` (`(جزء n)` for Arabic transcripts). A video shorter than the minimum stays one clip.
+- `HIGHLIGHTS`: each moment's start and end move to the nearest cut point; a moment shorter than the minimum is extended forward, then backward, to a pause; a moment longer than the maximum is split into parts.
+
+Subtitle layout: the subtitle style has `displayMode`, `PHRASE` (default, short lines) or `WORD` (one word at a time, a word stays up until the next starts unless the speaker pauses for more than 0.35 seconds). It is accepted by `GET /subtitles/styles/resolve` and by the render requests together with the other style fields, and listed as `displayModes` in `GET /subtitles/styles`. `GET /clips/:id/subtitles?mode=WORD` returns the word cues (`displayMode` is part of the response; the default is `PHRASE`). Renders stored before this field existed are read as `PHRASE`. Cue edits are numbered per cue, so the workspace clears them when the layout is switched. The Subtitle style panel has a "Show subtitles as" choice and the stage preview follows it.
+
+Not verified against a real Cloudinary account: a 4 minute reel in word mode can have several hundred cues, each a text layer in the named transformation. Test one long reel before relying on it.

@@ -96,7 +96,7 @@ describe('RendersService subtitles', () => {
         fontSizePx: 50,
       });
 
-      expect(buildCues).toHaveBeenCalledWith('transcript-1', 10, 30);
+      expect(buildCues).toHaveBeenCalledWith('transcript-1', 10, 30, 'PHRASE');
       const data = (
         clipRender.create.mock.calls[0] as [{ data: Record<string, unknown> }]
       )[0].data;
@@ -324,8 +324,20 @@ describe('RendersService subtitles', () => {
         preset: 'CLASSIC',
       });
 
-      expect(buildCues).toHaveBeenNthCalledWith(1, 'transcript-1', 0, 20);
-      expect(buildCues).toHaveBeenNthCalledWith(2, 'transcript-1', 20, 40);
+      expect(buildCues).toHaveBeenNthCalledWith(
+        1,
+        'transcript-1',
+        0,
+        20,
+        'PHRASE',
+      );
+      expect(buildCues).toHaveBeenNthCalledWith(
+        2,
+        'transcript-1',
+        20,
+        40,
+        'PHRASE',
+      );
       const styles = clipRender.create.mock.calls.map(
         (call) =>
           (call as [{ data: { subtitleStyle: unknown } }])[0].data
@@ -375,9 +387,7 @@ describe('RendersService subtitles', () => {
 
     function downloadService(render: unknown) {
       const getClipDownloadUrl = jest.fn().mockReturnValue('https://download');
-      const ensureSubtitleTransformation = jest
-        .fn()
-        .mockResolvedValue(undefined);
+      const ensureSubtitleFile = jest.fn().mockResolvedValue(undefined);
       const clipRender = { findFirst: jest.fn().mockResolvedValue(render) };
       const service = new RendersService(
         { clipRender } as unknown as PrismaService,
@@ -385,24 +395,20 @@ describe('RendersService subtitles', () => {
         {} as unknown as SubtitlesService,
         {
           getClipDownloadUrl,
-          ensureSubtitleTransformation,
+          ensureSubtitleFile,
         } as unknown as StorageService,
       );
       return {
         service,
         getClipDownloadUrl,
-        ensureSubtitleTransformation,
+        ensureSubtitleFile,
         clipRender,
       };
     }
 
     it('builds the download with the stored subtitles so it matches the render', async () => {
-      const {
-        service,
-        getClipDownloadUrl,
-        ensureSubtitleTransformation,
-        clipRender,
-      } = downloadService(completedRender);
+      const { service, getClipDownloadUrl, ensureSubtitleFile, clipRender } =
+        downloadService(completedRender);
 
       await expect(service.getDownloadUrl('user-1', 'render-1')).resolves.toBe(
         'https://download',
@@ -423,14 +429,14 @@ describe('RendersService subtitles', () => {
         'clip-clip-1-9x16-subtitled',
         { reframe: true, subtitles: { style: reelStyle, cues } },
       );
-      expect(ensureSubtitleTransformation).toHaveBeenCalledWith({
+      expect(ensureSubtitleFile).toHaveBeenCalledWith({
         style: reelStyle,
         cues,
       });
     });
 
     it('builds a plain download for a render without subtitles', async () => {
-      const { service, getClipDownloadUrl, ensureSubtitleTransformation } =
+      const { service, getClipDownloadUrl, ensureSubtitleFile } =
         downloadService({
           ...completedRender,
           subtitleStyle: null,
@@ -438,7 +444,7 @@ describe('RendersService subtitles', () => {
         });
 
       await service.getDownloadUrl('user-1', 'render-1');
-      expect(ensureSubtitleTransformation).not.toHaveBeenCalled();
+      expect(ensureSubtitleFile).not.toHaveBeenCalled();
 
       expect(getClipDownloadUrl).toHaveBeenCalledWith(
         'cloud/video-1',
@@ -501,7 +507,7 @@ describe('RendersService subtitles', () => {
 
       await service.retry('user-1', 'render-1');
 
-      expect(buildCues).toHaveBeenCalledWith('transcript-1', 12, 34);
+      expect(buildCues).toHaveBeenCalledWith('transcript-1', 12, 34, 'PHRASE');
       expect(clipRender.update).toHaveBeenCalledWith({
         where: { id: 'render-1' },
         data: {

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Amiri, Cairo } from 'next/font/google';
 import { AuthProvider } from '@/components/auth/auth-provider';
+import { ToastProvider } from '@/components/feedback/toast-provider';
 import '@/lib/env';
 import './globals.css';
 
@@ -29,7 +30,9 @@ export default function RootLayout({ children }: LayoutProps<'/'>) {
       className={`h-full antialiased ${cairo.variable} ${amiri.variable}`}
     >
       <body className="min-h-full flex flex-col">
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </AuthProvider>
       </body>
     </html>
   );

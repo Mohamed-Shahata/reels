@@ -8,13 +8,14 @@ import {
 
 export const SUBTITLE_STYLE_STORAGE_KEY = 'podcast-reels:subtitle-style';
 export const SUBTITLE_REFERENCE_WIDTH_PX = 720;
+export const SUBTITLE_BOX_RADIUS_REFERENCE_PX = 14;
 
 export interface SubtitleSelection {
   presetId: string;
   style: SubtitleStyle;
 }
 
-const FONT_STACKS: Record<SubtitleStyle['fontFamily'], string> = {
+export const FONT_STACKS: Record<SubtitleStyle['fontFamily'], string> = {
   Cairo: 'var(--font-cairo), Cairo, Tahoma, sans-serif',
   Amiri: 'var(--font-amiri), Amiri, "Times New Roman", serif',
   Arial: 'Arial, Helvetica, sans-serif',
@@ -133,6 +134,8 @@ export function getPreviewTextStyle(style: SubtitleStyle): CSSProperties {
     fontWeight: style.bold ? 700 : 400,
     color: style.textColor,
     backgroundColor: hexToRgba(style.backgroundColor, style.backgroundOpacity),
+    // Same curve as the burned-in box: 14 px on the 720 px reference frame.
+    borderRadius: `${((SUBTITLE_BOX_RADIUS_REFERENCE_PX / SUBTITLE_REFERENCE_WIDTH_PX) * 100).toFixed(3)}cqw`,
   };
 }
 

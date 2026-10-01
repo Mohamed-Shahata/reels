@@ -60,6 +60,26 @@ const libraryVideoSchema = z.object({
 
 const libraryVideosSchema = z.array(libraryVideoSchema);
 
+const transcriptionStateSchema = z.enum([
+  'NONE',
+  'PENDING',
+  'RUNNING',
+  'COMPLETED',
+  'FAILED',
+]);
+
+const librarySummarySchema = libraryVideoSchema.extend({
+  thumbnailUrl: z.string().nullable(),
+  clipCount: z.number().int().min(0),
+  reelCount: z.number().int().min(0),
+  transcriptReady: z.boolean(),
+  transcriptionState: transcriptionStateSchema,
+  transcriptionProgress: z.number().min(0).max(100),
+  failureReason: z.string().nullable(),
+});
+
+const librarySummariesSchema = z.array(librarySummarySchema);
+
 const clipSchema = z.object({
   id: z.string(),
   videoId: z.string(),
@@ -114,7 +134,11 @@ export const subtitleStyleSchema = z.object({
   backgroundColor: hexColorSchema,
   backgroundOpacity: z.number().min(0).max(1),
   position: z.enum(['TOP', 'MIDDLE', 'BOTTOM']),
+  // Renders made before word-by-word subtitles existed have no mode.
+  displayMode: z.enum(['PHRASE', 'WORD']).default('PHRASE'),
 });
+
+export const aiClipModeSchema = z.enum(['FULL', 'HIGHLIGHTS']);
 
 const subtitleEditSchema = z.object({
   index: z.number().int().min(1),
@@ -131,6 +155,7 @@ const subtitleCueSchema = z.object({
 const clipSubtitlesSchema = z.object({
   clipId: z.string(),
   language: z.string(),
+  displayMode: z.enum(['PHRASE', 'WORD']).default('PHRASE'),
   startSec: z.number().min(0),
   endSec: z.number().positive(),
   durationSec: z.number().positive(),
@@ -162,6 +187,8 @@ const transcriptSegmentSchema = z.object({
   startSec: z.number(),
   endSec: z.number(),
   text: z.string(),
+  // Optional: shown as speaker filters when the backend provides diarization.
+  speaker: z.string().nullish(),
 });
 
 const transcriptSchema = z
@@ -184,6 +211,10 @@ const subtitleStyleCatalogSchema = z.object({
   defaultPresetId: z.string().min(1),
   fonts: z.array(subtitleStyleSchema.shape.fontFamily).min(1),
   positions: z.array(subtitleStyleSchema.shape.position).min(1),
+  displayModes: z
+    .array(subtitleStyleSchema.shape.displayMode)
+    .min(1)
+    .default(['PHRASE', 'WORD']),
   fontSize: z.object({
     min: z.number().int().positive(),
     max: z.number().int().positive(),
@@ -196,6 +227,7 @@ const errorSchema = z.object({
   requestId: z.string().min(1).optional(),
 });
 
+export type LibrarySummary = z.infer<typeof librarySummarySchema>;
 export type User = z.infer<typeof userSchema>;
 export type CreateVideoUpload = z.infer<typeof createVideoSchema>;
 export type UploadConstraints = z.infer<typeof uploadConstraintsSchema>;
@@ -207,11 +239,18 @@ export type TranscriptSegment = z.infer<typeof transcriptSegmentSchema>;
 export type Transcript = z.infer<typeof transcriptSchema>;
 export type ClipRender = z.infer<typeof clipRenderSchema>;
 export type SubtitleStyle = z.infer<typeof subtitleStyleSchema>;
+export type SubtitleDisplayMode = SubtitleStyle['displayMode'];
+export type AiClipMode = z.infer<typeof aiClipModeSchema>;
 export type SubtitleEdit = z.infer<typeof subtitleEditSchema>;
 export type SubtitleCue = z.infer<typeof subtitleCueSchema>;
 export type ClipSubtitles = z.infer<typeof clipSubtitlesSchema>;
 export type SubtitleStylePreset = z.infer<typeof subtitleStylePresetSchema>;
 export type SubtitleStyleCatalog = z.infer<typeof subtitleStyleCatalogSchema>;
+
+export interface CreateVideoOptions {
+  language?: 'ar' | 'en';
+  autoClips?: boolean;
+}
 
 export interface ClipUrlOptions {
   reframe?: boolean;
@@ -222,6 +261,8 @@ export interface RenderRequestOptions {
   presetId?: string;
   style?: SubtitleStyle;
   edits?: SubtitleEdit[];
+  /** Discard this clip's old subtitled renders and render again from scratch. */
+  regenerate?: boolean;
 }
 
 function renderRequestBody(options: RenderRequestOptions): string {
@@ -229,6 +270,7 @@ function renderRequestBody(options: RenderRequestOptions): string {
 
   return JSON.stringify({
     subtitles: true,
+    ...(options.regenerate && { regenerate: true }),
     ...(options.presetId && { preset: options.presetId }),
     ...options.style,
     ...(options.edits?.length && { subtitleEdits: options.edits }),
@@ -316,10 +358,11 @@ export const api = {
   getVideoUploadConstraints: () =>
     request('/videos/upload-constraints', uploadConstraintsSchema),
   getVideos: () => request('/videos', libraryVideosSchema),
-  createVideo: (title: string) =>
+  getLibrary: () => request('/videos/library', librarySummariesSchema),
+  createVideo: (title: string, options: CreateVideoOptions = {}) =>
     request('/videos', createVideoSchema, {
       method: 'POST',
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({ title, ...options }),
     }),
   getVideoUploadSignature: (videoId: string) =>
     request(`/videos/${videoId}/upload-signature`, uploadSignatureSchema, {
@@ -349,13 +392,14 @@ export const api = {
     }),
   createAiClips: (
     videoId: string,
-    options: { confirmReplace?: boolean } = {},
+    options: { confirmReplace?: boolean; mode?: AiClipMode } = {},
   ) =>
     request(`/videos/${videoId}/ai-clips`, clipsSchema, {
       method: 'POST',
-      body: JSON.stringify(
-        options.confirmReplace ? { confirmReplace: true } : {},
-      ),
+      body: JSON.stringify({
+        ...(options.confirmReplace && { confirmReplace: true }),
+        ...(options.mode && { mode: options.mode }),
+      }),
     }),
   getUsage: () => request('/usage', usageSchema),
   splitClip: (clipId: string, splitSec: number) =>
@@ -410,14 +454,42 @@ export const api = {
       method: 'POST',
       body: renderRequestBody({ ...options, edits: undefined }),
     }),
+  deleteSubtitledRenders: (videoId: string) =>
+    request(
+      `/videos/${videoId}/renders/subtitled`,
+      z.object({ deleted: z.number() }),
+      { method: 'DELETE' },
+    ),
+  deleteClipSubtitledRenders: (clipId: string) =>
+    request(
+      `/clips/${clipId}/renders/subtitled`,
+      z.object({ deleted: z.number() }),
+      { method: 'DELETE' },
+    ),
   getRenderDownloadUrl: (renderId: string) =>
     request(`/renders/${renderId}/download`, clipUrlSchema),
-  getClipSubtitles: (clipId: string) =>
-    request(`/clips/${clipId}/subtitles`, clipSubtitlesSchema),
+  getClipSubtitles: (clipId: string, mode?: SubtitleDisplayMode) =>
+    request(
+      `/clips/${clipId}/subtitles${mode ? `?mode=${mode}` : ''}`,
+      clipSubtitlesSchema,
+    ),
   getSubtitleStyleCatalog: () =>
     request('/subtitles/styles', subtitleStyleCatalogSchema),
   retryRender: (renderId: string) =>
     request(`/renders/${renderId}/retry`, clipRenderSchema, {
+      method: 'POST',
+    }),
+  /** Stops a render that is waiting or running; it can be resumed later. */
+  stopRender: (renderId: string) =>
+    request(`/renders/${renderId}/stop`, clipRenderSchema, {
+      method: 'POST',
+    }),
+  stopClipRenders: (clipId: string) =>
+    request(`/clips/${clipId}/renders/stop`, clipRendersSchema, {
+      method: 'POST',
+    }),
+  stopVideoRenders: (videoId: string) =>
+    request(`/videos/${videoId}/renders/stop`, clipRendersSchema, {
       method: 'POST',
     }),
 };

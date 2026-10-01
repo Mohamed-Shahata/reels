@@ -46,7 +46,11 @@ describe('AiClipRunsService', () => {
     ]);
 
     expect(usage.reserveAiRun).toHaveBeenCalledWith('user-1');
-    expect(segmentation.suggest).toHaveBeenCalledWith('user-1', 'video-1');
+    expect(segmentation.suggest).toHaveBeenCalledWith(
+      'user-1',
+      'video-1',
+      'FULL',
+    );
     expect(clips.createAiSuggestions).toHaveBeenCalledWith(
       'user-1',
       'video-1',
@@ -125,5 +129,17 @@ describe('AiClipRunsService', () => {
       NotFoundException,
     );
     expect(usage.reserveAiRun).not.toHaveBeenCalled();
+  });
+
+  it('passes the chosen mode to the segmentation step', async () => {
+    const { service, segmentation } = createService();
+
+    await service.run('user-1', 'video-1', { mode: 'HIGHLIGHTS' });
+
+    expect(segmentation.suggest).toHaveBeenCalledWith(
+      'user-1',
+      'video-1',
+      'HIGHLIGHTS',
+    );
   });
 });

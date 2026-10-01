@@ -11,5 +11,6 @@ import { ClipsService } from './clips.service';
   imports: [PrismaModule, StorageModule, SegmentationModule, UsageModule],
   controllers: [ClipsController],
   providers: [ClipsService, AiClipRunsService],
+  exports: [AiClipRunsService],
 })
 export class ClipsModule {}

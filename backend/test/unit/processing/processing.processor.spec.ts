@@ -9,7 +9,11 @@ import type { PrismaService } from '../../../src/prisma/prisma.service';
 import type { ProcessingQueueJobPayload } from '../../../src/processing/processing.constants';
 import type { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
 import { ProcessingProcessor } from '../../../src/processing/processing.processor';
-import type { ClipRenderExecutorService } from '../../../src/renders/clip-render-executor.service';
+import type { AiClipRunsService } from '../../../src/clips/ai-clip-runs.service';
+import {
+  RenderStoppedError,
+  type ClipRenderExecutorService,
+} from '../../../src/renders/clip-render-executor.service';
 import type { TranscriptionService } from '../../../src/transcription/transcription.service';
 
 function createProcessor(job: Record<string, unknown>) {
@@ -26,6 +30,7 @@ function createProcessor(job: Record<string, unknown>) {
     {} as PrismaService,
     {} as TranscriptionService,
     renderExecutor as unknown as ClipRenderExecutorService,
+    {} as unknown as AiClipRunsService,
   );
   const bullJob = {
     data: { processingJobId: 'job-1', type: 'RENDER' },
@@ -49,6 +54,7 @@ describe('ProcessingProcessor render jobs', () => {
 
     expect(renderExecutor.execute).toHaveBeenCalledWith(
       'render-1',
+      expect.any(Function),
       expect.any(Function),
     );
     expect(jobsService.updateProgress).toHaveBeenCalledWith('job-1', 30);
@@ -79,5 +85,37 @@ describe('ProcessingProcessor render jobs', () => {
     );
     expect(renderExecutor.execute).not.toHaveBeenCalled();
     expect(jobsService.markFailed).toHaveBeenCalled();
+  });
+});
+
+describe('ProcessingProcessor stopped render jobs', () => {
+  it('skips a job the user stopped before it started', async () => {
+    const { processor, jobsService, renderExecutor, bullJob } = createProcessor(
+      {
+        id: 'job-1',
+        type: 'RENDER',
+        status: 'FAILED',
+        lastError: 'Stopped by the user',
+        payload: { clipRenderId: 'render-1' },
+      },
+    );
+
+    await processor.process(bullJob);
+
+    expect(jobsService.markRunning).not.toHaveBeenCalled();
+    expect(renderExecutor.execute).not.toHaveBeenCalled();
+    expect(jobsService.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('ends quietly when the render is stopped while running', async () => {
+    const { processor, jobsService, renderExecutor, bullJob } = createProcessor(
+      { id: 'job-1', type: 'RENDER', payload: { clipRenderId: 'render-1' } },
+    );
+    renderExecutor.execute.mockRejectedValue(new RenderStoppedError());
+
+    await expect(processor.process(bullJob)).resolves.toBeUndefined();
+
+    expect(jobsService.markFailed).not.toHaveBeenCalled();
+    expect(jobsService.markCompleted).not.toHaveBeenCalled();
   });
 });

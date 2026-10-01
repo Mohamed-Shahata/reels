@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsInt,
   IsOptional,
   IsString,
@@ -25,6 +26,14 @@ export class SubtitleEditDto {
 }
 
 export class CreateClipRenderDto extends CreateRenderDto {
+  /**
+   * Throws away this clip's finished and failed subtitled renders first, so
+   * the reel is rendered again from scratch instead of reusing the old one.
+   */
+  @IsOptional()
+  @IsBoolean()
+  regenerate?: boolean;
+
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(MAX_SUBTITLE_EDITS)

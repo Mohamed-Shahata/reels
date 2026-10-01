@@ -6,6 +6,7 @@ import {
   getApiErrorMessage,
   type Clip,
   type ClipSubtitles,
+  type SubtitleDisplayMode,
   type SubtitleEdit,
 } from '@/lib/api';
 import {
@@ -22,15 +23,37 @@ import {
 interface SubtitleTextEditorProps {
   clip: Clip;
   edits: SubtitleEdit[];
+  /** Cue layout to edit; word-by-word has one cue per word. */
+  displayMode?: SubtitleDisplayMode;
   onChange: (edits: SubtitleEdit[]) => void;
 }
 
 const buttonClass =
-  'h-8 border border-[#a9bab3] px-2 text-xs font-medium hover:border-[#0f766e] disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#d5e2dc] bg-white px-3 text-xs font-semibold text-[#3f4f4a] hover:border-[#0f766e] hover:bg-[#e4f3ef] hover:text-[#0f766e] disabled:cursor-not-allowed disabled:opacity-50';
+
+function PencilIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      height="14"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+      viewBox="0 0 24 24"
+      width="14"
+    >
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+    </svg>
+  );
+}
 
 export function SubtitleTextEditor({
   clip,
   edits,
+  displayMode = 'PHRASE',
   onChange,
 }: SubtitleTextEditorProps) {
   const [open, setOpen] = useState(false);
@@ -43,7 +66,7 @@ export function SubtitleTextEditor({
     setLoading(true);
     setError(null);
     try {
-      const next = await api.getClipSubtitles(clip.id);
+      const next = await api.getClipSubtitles(clip.id, displayMode);
       setSubtitles(next);
       setDrafts(editsToDrafts(edits));
     } catch (requestError) {
@@ -53,7 +76,7 @@ export function SubtitleTextEditor({
     } finally {
       setLoading(false);
     }
-  }, [clip.id, edits]);
+  }, [clip.id, edits, displayMode]);
 
   function toggle() {
     if (open) {
@@ -78,7 +101,7 @@ export function SubtitleTextEditor({
         <span className="text-xs font-semibold">Subtitle text</span>
         {edits.length > 0 ? (
           <span
-            className="bg-[#e6f4f1] px-2 py-0.5 text-xs font-semibold text-[#0f766e]"
+            className="rounded-full bg-[#e4f3ef] px-2 py-0.5 text-xs font-semibold text-[#0f766e]"
             role="status"
           >
             {edits.length} edited
@@ -91,12 +114,13 @@ export function SubtitleTextEditor({
         onClick={toggle}
         type="button"
       >
+        <PencilIcon />
         {open ? 'Hide subtitle editor' : 'Edit subtitle text'}
       </button>
       {open ? (
         <div className="mt-3">
           {loading ? (
-            <p className="text-xs text-[#5f6e69]" role="status">
+            <p className="text-xs text-[#5d6d68]" role="status">
               Loading subtitles...
             </p>
           ) : null}
@@ -113,7 +137,7 @@ export function SubtitleTextEditor({
             </div>
           ) : null}
           {subtitles && subtitles.cues.length === 0 ? (
-            <p className="text-xs text-[#5f6e69]">
+            <p className="text-xs text-[#5d6d68]">
               This clip has no speech to subtitle.
             </p>
           ) : null}
@@ -127,15 +151,15 @@ export function SubtitleTextEditor({
                   timing.
                 </p>
               ) : null}
-              <p className="mb-2 text-xs text-[#5f6e69]">
+              <p className="mb-2 text-xs text-[#5d6d68]">
                 Edit the text of a line, or clear it to hide the line. Timing
                 stays the same.
               </p>
-              <ol className="grid gap-2">
+              <ol className="grid max-h-80 gap-2 overflow-y-auto pr-1">
                 {subtitles.cues.map((cue) => (
                   <li key={cue.index}>
                     <label
-                      className="block text-xs text-[#5f6e69]"
+                      className="block text-xs text-[#5d6d68]"
                       htmlFor={`cue-${clip.id}-${cue.index}`}
                     >
                       {formatCueTime(cue.startSec)} to{' '}
@@ -143,7 +167,7 @@ export function SubtitleTextEditor({
                     </label>
                     <textarea
                       aria-label={`Subtitle ${cue.index} text`}
-                      className="mt-1 w-full border border-[#a9bab3] px-2 py-1 text-sm focus:border-[#0f766e] focus:outline-none"
+                      className="mt-1 w-full rounded-lg border border-[#d5e2dc] bg-white px-2 py-1 text-sm focus:border-[#0f766e] focus:outline-none"
                       dir="auto"
                       id={`cue-${clip.id}-${cue.index}`}
                       maxLength={MAX_SUBTITLE_EDIT_TEXT_LENGTH}
@@ -158,7 +182,7 @@ export function SubtitleTextEditor({
               </ol>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
-                  className="h-8 bg-[#0f766e] px-3 text-xs font-semibold text-white hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
+                  className="h-8 rounded-lg bg-[#0f766e] px-3 text-xs font-semibold text-white hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
                   disabled={!dirty}
                   onClick={() => onChange(pending)}
                   type="button"
@@ -188,7 +212,7 @@ export function SubtitleTextEditor({
                 ) : null}
               </div>
               {edits.length > 0 ? (
-                <p className="mt-2 text-xs text-[#5f6e69]">
+                <p className="mt-2 text-xs text-[#5d6d68]">
                   {hiddenCount > 0
                     ? `${edits.length} edited, ${hiddenCount} hidden. `
                     : ''}

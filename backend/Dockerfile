@@ -25,6 +25,7 @@ RUN npm ci --omit=dev
 
 COPY prisma ./prisma
 COPY prisma.config.ts ./
+COPY assets ./assets
 COPY --from=build /app/dist ./dist
 
 EXPOSE 4000

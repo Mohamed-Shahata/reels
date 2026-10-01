@@ -400,3 +400,150 @@ describe('VideosService.getTranscript', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 });
+
+describe('VideosService.listLibrary', () => {
+  it('summarises clips, reels, transcript state and thumbnails per video', async () => {
+    const base = {
+      cloudinaryId: null,
+      durationSec: null,
+      sizeBytes: null,
+      createdAt: new Date('2026-09-28T10:00:00.000Z'),
+    };
+    const video = {
+      findMany: jest.fn().mockResolvedValue([
+        {
+          ...base,
+          id: 'v-ready',
+          title: 'Ready',
+          cloudinaryId: 'videos/user-1/v-ready',
+          durationSec: 120,
+          sizeBytes: 10n,
+          status: 'READY',
+          transcript: { id: 't-1' },
+          clips: [
+            {
+              renders: [{ outputUrl: 'https://x/1.mp4' }, { outputUrl: null }],
+            },
+            { renders: [{ outputUrl: 'https://x/2.mp4' }] },
+            { renders: [] },
+          ],
+          processingJobs: [
+            { status: 'COMPLETED', progress: 100, lastError: null },
+          ],
+        },
+        {
+          ...base,
+          id: 'v-failed',
+          title: 'Failed',
+          status: 'FAILED',
+          transcript: null,
+          clips: [],
+          processingJobs: [],
+        },
+        {
+          ...base,
+          id: 'v-transcribing',
+          title: 'Transcribing',
+          cloudinaryId: 'videos/user-1/v-transcribing',
+          durationSec: 60,
+          status: 'READY',
+          transcript: null,
+          clips: [],
+          processingJobs: [
+            { status: 'RUNNING', progress: 40, lastError: null },
+          ],
+        },
+      ]),
+    };
+    const storage = {
+      getVideoThumbnailUrl: jest.fn((id: string) => `https://thumb/${id}.jpg`),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      storage as unknown as StorageService,
+      noopJobsService,
+    );
+
+    const result = await service.listLibrary('user-1');
+
+    expect(result[0]).toMatchObject({
+      id: 'v-ready',
+      clipCount: 3,
+      reelCount: 2,
+      transcriptReady: true,
+      transcriptionState: 'COMPLETED',
+      thumbnailUrl: 'https://thumb/videos/user-1/v-ready.jpg',
+      failureReason: null,
+    });
+    expect(result[1]).toMatchObject({
+      id: 'v-failed',
+      thumbnailUrl: null,
+      transcriptionState: 'NONE',
+    });
+    expect(result[1].failureReason).toContain('Retry');
+    expect(result[2]).toMatchObject({
+      transcriptReady: false,
+      transcriptionState: 'RUNNING',
+      transcriptionProgress: 40,
+    });
+  });
+});
+
+describe('VideosService language options', () => {
+  it('stores the chosen language and auto clip option on create', async () => {
+    const video = {
+      create: jest.fn().mockResolvedValue({
+        id: 'video-1',
+        title: 'Episode',
+        status: 'UPLOADING',
+        createdAt: new Date(),
+      }),
+    };
+    const storage = {
+      createUploadSignature: jest.fn().mockReturnValue({}),
+      getVideoPublicId: jest.fn().mockReturnValue('id'),
+    };
+    const service = new VideosService(
+      { video } as unknown as PrismaService,
+      storage as unknown as StorageService,
+      noopJobsService,
+    );
+
+    await service.createUpload('user-1', 'Episode', {
+      language: 'en',
+      autoClips: true,
+    });
+
+    expect(video.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: {
+          userId: 'user-1',
+          title: 'Episode',
+          language: 'en',
+          autoClips: true,
+        },
+      }),
+    );
+  });
+
+  it('transcribes with the language saved on the video', async () => {
+    const createJob = jest.fn().mockResolvedValue({ id: 'job-1' });
+    const service = new VideosService(
+      {
+        video: {
+          findFirst: jest
+            .fn()
+            .mockResolvedValue({ id: 'video-1', language: 'en' }),
+        },
+      } as unknown as PrismaService,
+      {} as StorageService,
+      { createJob } as unknown as ProcessingJobsService,
+    );
+
+    await service.startTranscription('user-1', 'video-1');
+
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { language: 'en' } }),
+    );
+  });
+});

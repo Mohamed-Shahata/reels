@@ -149,11 +149,43 @@ describe('GET /api/v1/clips/:id/subtitles (e2e)', () => {
     expect(response.body).toEqual({
       clipId: 'clip-1',
       language: 'ar',
+      displayMode: 'PHRASE',
       startSec: 100,
       endSec: 110,
       durationSec: 10,
       timing: 'WORD',
       cues: [{ index: 1, startSec: 0.5, endSec: 1.4, text: 'مرحبا بكم' }],
     });
+  });
+
+  it('builds one cue per word when the word mode is requested', async () => {
+    const cookies = await registerAndLogin('owner@example.com');
+    seedClip();
+    seedTranscript();
+
+    const response = await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/subtitles')
+      .query({ mode: 'WORD' })
+      .set('Cookie', cookies)
+      .expect(200);
+
+    const body = response.body as {
+      displayMode: string;
+      cues: { text: string }[];
+    };
+    expect(body.displayMode).toBe('WORD');
+    expect(body.cues.map((cue) => cue.text)).toEqual(['مرحبا', 'بكم']);
+  });
+
+  it('rejects an unknown subtitle mode', async () => {
+    const cookies = await registerAndLogin('owner@example.com');
+    seedClip();
+    seedTranscript();
+
+    await request(app.getHttpServer())
+      .get('/api/v1/clips/clip-1/subtitles')
+      .query({ mode: 'LETTER' })
+      .set('Cookie', cookies)
+      .expect(400);
   });
 });

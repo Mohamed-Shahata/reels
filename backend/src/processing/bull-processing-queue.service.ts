@@ -23,6 +23,16 @@ export class BullProcessingQueueService implements ProcessingQueueClient {
     });
   }
 
+  async remove(processingJobId: string): Promise<void> {
+    const existing = await this.queue.getJob(processingJobId);
+    if (!existing) return;
+
+    const state = await existing.getState();
+    if (state === 'waiting' || state === 'delayed' || state === 'prioritized') {
+      await existing.remove();
+    }
+  }
+
   async ensureQueued(payload: ProcessingQueueJobPayload): Promise<void> {
     const existing = await this.queue.getJob(payload.processingJobId);
     if (!existing) {

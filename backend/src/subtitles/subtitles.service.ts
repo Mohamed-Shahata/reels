@@ -10,6 +10,10 @@ import {
   type SubtitleCue,
   type SubtitleWord,
 } from './subtitle-cue-builder';
+import {
+  DEFAULT_SUBTITLE_DISPLAY_MODE,
+  type SubtitleDisplayMode,
+} from './subtitle-style';
 
 // Segments are loaded slightly beyond the clip so a word whose segment ends
 // just outside the clip edge is still considered.
@@ -20,6 +24,8 @@ export type SubtitleTiming = 'WORD' | 'ESTIMATED' | 'MIXED' | 'NONE';
 export interface ClipSubtitles {
   clipId: string;
   language: string;
+  /** Whether each cue is a short phrase or a single word. */
+  displayMode: SubtitleDisplayMode;
   /** Clip range in the source video. */
   startSec: number;
   endSec: number;
@@ -47,6 +53,7 @@ export class SubtitlesService {
   async getClipSubtitles(
     userId: string,
     clipId: string,
+    displayMode: SubtitleDisplayMode = DEFAULT_SUBTITLE_DISPLAY_MODE,
   ): Promise<ClipSubtitles> {
     const clip = await this.prisma.clip.findFirst({
       where: { id: clipId, video: { is: { userId } } },
@@ -74,11 +81,13 @@ export class SubtitlesService {
       transcript.id,
       clip.startSec,
       clip.endSec,
+      displayMode,
     );
 
     return {
       clipId: clip.id,
       language: transcript.language,
+      displayMode,
       startSec: clip.startSec,
       endSec: clip.endSec,
       durationSec: clip.endSec - clip.startSec,
@@ -91,6 +100,7 @@ export class SubtitlesService {
     transcriptId: string,
     startSec: number,
     endSec: number,
+    displayMode: SubtitleDisplayMode = DEFAULT_SUBTITLE_DISPLAY_MODE,
   ): Promise<{ cues: SubtitleCue[]; timing: SubtitleTiming }> {
     const segments = await this.prisma.transcriptSegment.findMany({
       where: {
@@ -108,7 +118,7 @@ export class SubtitlesService {
     }
 
     return {
-      cues: buildSubtitleCues(words, startSec, endSec),
+      cues: buildSubtitleCues(words, startSec, endSec, {}, displayMode),
       timing: this.describeTiming(words),
     };
   }

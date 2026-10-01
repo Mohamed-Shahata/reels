@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BoundaryReconciliationService } from './boundary-reconciliation.service';
 import { BoundarySnappingService } from './boundary-snapping.service';
+import { ClipPlannerService } from './clip-planner.service';
 import { TopicSegmentValidationService } from './topic-segment-validation.service';
 import { TopicSegmentationService } from './topic-segmentation.service';
 import { TranscriptWindowingService } from './transcript-windowing.service';
@@ -12,6 +13,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     TranscriptWindowingService,
     BoundaryReconciliationService,
     BoundarySnappingService,
+    ClipPlannerService,
     TopicSegmentValidationService,
     TopicSegmentationService,
   ],
@@ -19,6 +21,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     TranscriptWindowingService,
     BoundaryReconciliationService,
     BoundarySnappingService,
+    ClipPlannerService,
     TopicSegmentValidationService,
     TopicSegmentationService,
   ],

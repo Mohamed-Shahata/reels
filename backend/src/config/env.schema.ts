@@ -55,6 +55,15 @@ export const envSchema = z
     SEGMENTATION_MONTHLY_RUN_LIMIT: z.coerce.number().int().min(1).default(20),
     RENDER_POLL_INTERVAL_MS: z.coerce.number().int().min(1).default(3000),
     RENDER_TIMEOUT_MS: z.coerce.number().int().min(1).default(300000),
+    // LAYERS draws every subtitle as its own Cloudinary text layer (letters are
+    // never clipped). SRT uploads one subtitle file instead; use it only if a
+    // very long clip is rejected by Cloudinary for being too large.
+    SUBTITLE_BURN_MODE: z.enum(['LAYERS', 'SRT']).default('LAYERS'),
+    // LAYERS mode only. ALPHA: one layer per cue, the box opacity is the alpha
+    // of its colour (short URL, but Cloudinary may draw a solid box). LAYERED:
+    // box and text are separate layers so the opacity is honoured, at twice
+    // the layers; if a reel then fails to play, go back to ALPHA.
+    SUBTITLE_BOX_MODE: z.enum(['ALPHA', 'LAYERED']).default('ALPHA'),
     VIDEO_ALLOWED_FORMATS: nonEmpty
       .default('mp4,mov,webm')
       .transform((value) =>
@@ -77,7 +86,9 @@ export const envSchema = z
       .positive()
       .default(4 * 60 * 60),
     CLIP_MIN_DURATION_SEC: z.coerce.number().positive().default(5),
-    CLIP_MAX_DURATION_SEC: z.coerce.number().positive().default(180),
+    CLIP_MAX_DURATION_SEC: z.coerce.number().positive().default(240),
+    AI_CLIP_MIN_DURATION_SEC: z.coerce.number().positive().default(60),
+    AI_CLIP_MAX_DURATION_SEC: z.coerce.number().positive().default(240),
     STALE_UPLOAD_THRESHOLD_SEC: z.coerce.number().int().min(60).default(86400),
     STALE_UPLOAD_CLEANUP_INTERVAL_SEC: z.coerce
       .number()
@@ -88,7 +99,14 @@ export const envSchema = z
   .refine((env) => env.CLIP_MAX_DURATION_SEC >= env.CLIP_MIN_DURATION_SEC, {
     path: ['CLIP_MAX_DURATION_SEC'],
     message: 'must be greater than or equal to CLIP_MIN_DURATION_SEC',
-  });
+  })
+  .refine(
+    (env) => env.AI_CLIP_MAX_DURATION_SEC >= env.AI_CLIP_MIN_DURATION_SEC,
+    {
+      path: ['AI_CLIP_MAX_DURATION_SEC'],
+      message: 'must be greater than or equal to AI_CLIP_MIN_DURATION_SEC',
+    },
+  );
 
 export type Env = z.infer<typeof envSchema>;
 

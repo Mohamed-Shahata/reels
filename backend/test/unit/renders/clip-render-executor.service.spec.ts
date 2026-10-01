@@ -1,7 +1,11 @@
 import type { ConfigService } from '@nestjs/config';
 import type { Env } from '../../../src/config/env.schema';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
-import { ClipRenderExecutorService } from '../../../src/renders/clip-render-executor.service';
+import {
+  ClipRenderExecutorService,
+  estimateWaitProgress,
+  RenderStoppedError,
+} from '../../../src/renders/clip-render-executor.service';
 import type { StorageService } from '../../../src/storage/storage.service';
 import { getSubtitlePreset } from '../../../src/subtitles/subtitle-style';
 
@@ -45,6 +49,24 @@ function mockHead(...statuses: number[]) {
   }
   return fetchSpy;
 }
+
+describe('estimateWaitProgress', () => {
+  it('eases from 30 towards 95 and never reaches 100', () => {
+    expect(estimateWaitProgress(0, 60)).toBe(30);
+    const samples = [2000, 5000, 10000, 20000, 60000, 600000].map((ms) =>
+      estimateWaitProgress(ms, 60),
+    );
+    expect([...samples].sort((a, b) => a - b)).toEqual(samples);
+    expect(samples[0]).toBeGreaterThan(30);
+    expect(Math.max(...samples)).toBeLessThanOrEqual(95);
+  });
+
+  it('moves slower for longer clips', () => {
+    expect(estimateWaitProgress(10000, 10)).toBeGreaterThan(
+      estimateWaitProgress(10000, 300),
+    );
+  });
+});
 
 describe('ClipRenderExecutorService', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -164,5 +186,38 @@ describe('ClipRenderExecutorService', () => {
     ).rejects.toThrow('Render source video is unavailable');
     expect(missing.storage.startClipReelRender).not.toHaveBeenCalled();
     expect(noAsset.storage.startClipReelRender).not.toHaveBeenCalled();
+  });
+
+  it('stops waiting as soon as the render is stopped and stores no output', async () => {
+    const { executor, clipRender } = createExecutor();
+    const fetchSpy = mockHead(423, 423, 423);
+    const shouldStop = jest
+      .fn()
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValue(true);
+
+    await expect(
+      executor.execute(
+        'render-1',
+        jest.fn().mockResolvedValue(undefined),
+        shouldStop,
+      ),
+    ).rejects.toBeInstanceOf(RenderStoppedError);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(clipRender.update).not.toHaveBeenCalled();
+  });
+
+  it('does not start the Cloudinary render when it was stopped before', async () => {
+    const { executor, storage } = createExecutor();
+
+    await expect(
+      executor.execute('render-1', jest.fn().mockResolvedValue(undefined), () =>
+        Promise.resolve(true),
+      ),
+    ).rejects.toBeInstanceOf(RenderStoppedError);
+
+    expect(storage.startClipReelRender).not.toHaveBeenCalled();
   });
 });

@@ -569,4 +569,60 @@ describe('RendersService', () => {
       expect(retryJob).not.toHaveBeenCalled();
     });
   });
+  describe('deleteSubtitledRenders', () => {
+    const subtitledRender = {
+      id: 'render-1',
+      startSec: 10,
+      endSec: 30,
+      subtitleStyle: {
+        fontFamily: 'Cairo',
+        fontSizePx: 34,
+        bold: true,
+        textColor: '#ffffff',
+        backgroundColor: '#000000',
+        backgroundOpacity: 0.6,
+        position: 'MIDDLE',
+        displayMode: 'WORD',
+      },
+      subtitleCues: [{ index: 1, startSec: 1, endSec: 2, text: 'أصلاً' }],
+      clip: { video: { cloudinaryId: 'cloud/video-1' } },
+    };
+
+    it('removes finished subtitled renders and their Cloudinary copies', async () => {
+      const prisma = {
+        video: { findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }) },
+        clipRender: {
+          findMany: jest.fn().mockResolvedValue([subtitledRender]),
+          deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+        },
+      };
+      const deleteClipReelRender = jest.fn().mockResolvedValue(undefined);
+      const service = createService(prisma, {}, {}, { deleteClipReelRender });
+
+      await expect(
+        service.deleteSubtitledRenders('user-1', { videoId: 'video-1' }),
+      ).resolves.toEqual({ deleted: 1 });
+
+      expect(deleteClipReelRender).toHaveBeenCalledWith(
+        'cloud/video-1',
+        10,
+        30,
+        expect.objectContaining({ style: subtitledRender.subtitleStyle }),
+      );
+      expect(prisma.clipRender.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['render-1'] } },
+      });
+    });
+
+    it('does not find a video that belongs to someone else', async () => {
+      const prisma = {
+        video: { findFirst: jest.fn().mockResolvedValue(null) },
+      };
+      await expect(
+        createService(prisma).deleteSubtitledRenders('user-2', {
+          videoId: 'video-1',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
 });

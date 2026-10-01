@@ -19,6 +19,7 @@ const style: SubtitleStyle = {
   backgroundColor: '#000000',
   backgroundOpacity: 0.63,
   position: 'BOTTOM',
+  displayMode: 'PHRASE',
 };
 
 describe('burn-in settings', () => {

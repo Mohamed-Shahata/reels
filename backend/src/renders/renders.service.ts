@@ -127,8 +127,14 @@ interface PreparedBurnIn {
   edits: SubtitleEdit[];
 }
 
+// Raise when the way subtitles are drawn changes (padding, box opacity...), so
+// finished reels made the old way are not reused for the same style and text.
+const SUBTITLE_RENDER_VERSION = 2;
+
 function computeSubtitleKey(burnIn: SubtitleBurnIn): string {
-  return createHash('sha256').update(JSON.stringify(burnIn)).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify({ version: SUBTITLE_RENDER_VERSION, ...burnIn }))
+    .digest('hex');
 }
 
 @Injectable()
@@ -145,7 +151,7 @@ export class RendersService {
     clipId: string,
     dto: CreateClipRenderDto = {},
   ): Promise<RenderView> {
-    const { subtitleEdits = [], ...renderDto } = dto;
+    const { subtitleEdits = [], regenerate = false, ...renderDto } = dto;
     if (subtitleEdits.length > 0 && !renderDto.subtitles) {
       throw new BadRequestException(
         'Subtitle edits can only be set when subtitles are enabled',
@@ -177,6 +183,10 @@ export class RendersService {
       throw new ConflictException('Video is not ready for rendering');
     }
 
+    if (regenerate) {
+      await this.removeSubtitledRenders({ clipId: clip.id });
+    }
+
     return this.queueRender(
       {
         userId,
@@ -187,6 +197,168 @@ export class RendersService {
       },
       clip,
     );
+  }
+
+  /**
+   * Deletes every finished or failed render with burned-in subtitles for a
+   * video, or for one clip of it. Renders that are still running are kept so a
+   * job in progress never loses its row. Called when the subtitle style or
+   * text changes, because those renders no longer match what the user sees.
+   */
+  async deleteSubtitledRenders(
+    userId: string,
+    scope: { videoId: string } | { clipId: string },
+  ): Promise<{ deleted: number }> {
+    if ('clipId' in scope) {
+      const clip = await this.prisma.clip.findFirst({
+        where: { id: scope.clipId, video: { is: { userId } } },
+        select: { id: true },
+      });
+      if (!clip) throw new NotFoundException('Clip was not found');
+      return this.removeSubtitledRenders({ clipId: clip.id });
+    }
+
+    const video = await this.prisma.video.findFirst({
+      where: { id: scope.videoId, userId },
+      select: { id: true },
+    });
+    if (!video) throw new NotFoundException('Video was not found');
+    return this.removeSubtitledRenders({ videoId: video.id });
+  }
+
+  private async removeSubtitledRenders(
+    scope: { videoId: string } | { clipId: string },
+  ): Promise<{ deleted: number }> {
+    const renders = await this.prisma.clipRender.findMany({
+      where: {
+        subtitleStyle: { not: Prisma.DbNull },
+        ...('clipId' in scope
+          ? { clipId: scope.clipId }
+          : { clip: { is: { videoId: scope.videoId } } }),
+        OR: [
+          { processingJobId: null },
+          {
+            processingJob: { is: { status: { in: ['COMPLETED', 'FAILED'] } } },
+          },
+        ],
+      },
+      select: {
+        id: true,
+        startSec: true,
+        endSec: true,
+        subtitleStyle: true,
+        subtitleCues: true,
+        clip: { select: { video: { select: { cloudinaryId: true } } } },
+      },
+    });
+    if (renders.length === 0) return { deleted: 0 };
+
+    // Best effort: the database rows are what the app reads, so a copy that
+    // cannot be removed from Cloudinary must not block the delete.
+    for (const render of renders) {
+      const publicId = render.clip.video.cloudinaryId;
+      if (!publicId) continue;
+      try {
+        const burnIn = readStoredBurnIn(
+          render.subtitleStyle,
+          render.subtitleCues,
+        );
+        if (burnIn) {
+          await this.storage.deleteClipReelRender(
+            publicId,
+            render.startSec,
+            render.endSec,
+            burnIn,
+          );
+        }
+      } catch {
+        // Unreadable stored subtitles: nothing to remove from Cloudinary.
+      }
+    }
+
+    const { count } = await this.prisma.clipRender.deleteMany({
+      where: { id: { in: renders.map((render) => render.id) } },
+    });
+    return { deleted: count };
+  }
+
+  /** Stops one render that is waiting or running. */
+  async stop(userId: string, renderId: string): Promise<RenderView> {
+    const render = await this.prisma.clipRender.findFirst({
+      where: { id: renderId, clip: { is: { video: { is: { userId } } } } },
+      select: {
+        id: true,
+        processingJobId: true,
+        processingJob: { select: { status: true } },
+      },
+    });
+    if (!render) throw new NotFoundException('Render was not found');
+
+    const status = render.processingJob?.status;
+    if (
+      !render.processingJobId ||
+      (status !== 'PENDING' && status !== 'RUNNING')
+    ) {
+      throw new ConflictException('Only a render in progress can be stopped');
+    }
+
+    await this.jobs.stopJob(render.processingJobId);
+    const refreshed = await this.prisma.clipRender.findFirstOrThrow({
+      where: { id: render.id },
+      select: renderSelect,
+    });
+    return toView(refreshed);
+  }
+
+  /** Stops every render in progress for one clip. */
+  async stopForClip(userId: string, clipId: string): Promise<RenderView[]> {
+    const clip = await this.prisma.clip.findFirst({
+      where: { id: clipId, video: { is: { userId } } },
+      select: { id: true },
+    });
+    if (!clip) throw new NotFoundException('Clip was not found');
+    return this.stopWhere({ clipId: clip.id });
+  }
+
+  /** Stops every render in progress for all clips of a video. */
+  async stopForVideo(userId: string, videoId: string): Promise<RenderView[]> {
+    const video = await this.prisma.video.findFirst({
+      where: { id: videoId, userId },
+      select: { id: true },
+    });
+    if (!video) throw new NotFoundException('Video was not found');
+    return this.stopWhere({ clip: { is: { videoId: video.id } } });
+  }
+
+  private async stopWhere(
+    scope: Prisma.ClipRenderWhereInput,
+  ): Promise<RenderView[]> {
+    const active = await this.prisma.clipRender.findMany({
+      where: {
+        ...scope,
+        processingJob: { is: { status: { in: ['PENDING', 'RUNNING'] } } },
+      },
+      select: { id: true, processingJobId: true },
+    });
+
+    const stopped: string[] = [];
+    for (const render of active) {
+      if (!render.processingJobId) continue;
+      try {
+        await this.jobs.stopJob(render.processingJobId);
+        stopped.push(render.id);
+      } catch (error) {
+        // It finished between the lookup and now; leave it as it is.
+        if (!(error instanceof ConflictException)) throw error;
+      }
+    }
+    if (stopped.length === 0) return [];
+
+    const renders = await this.prisma.clipRender.findMany({
+      where: { id: { in: stopped } },
+      select: renderSelect,
+    });
+    return renders.map(toView);
   }
 
   async createForVideo(
@@ -349,8 +521,8 @@ export class RendersService {
 
     const burnIn = readStoredBurnIn(render.subtitleStyle, render.subtitleCues);
     const suffix = burnIn ? '-9x16-subtitled' : '-9x16';
-    // Renders made before subtitles moved to a file have no named transformation yet.
-    if (burnIn) await this.storage.ensureSubtitleTransformation(burnIn);
+    // Make sure the subtitle file exists (older renders may not have one).
+    if (burnIn) await this.storage.ensureSubtitleFile(burnIn);
 
     return this.storage.getClipDownloadUrl(
       publicId,
@@ -445,6 +617,7 @@ export class RendersService {
       transcriptId,
       range.startSec,
       range.endSec,
+      subtitleStyle.displayMode,
     );
     const { cues, edits: appliedEdits } =
       edits.length > 0

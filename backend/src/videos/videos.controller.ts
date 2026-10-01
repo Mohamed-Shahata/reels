@@ -25,6 +25,11 @@ export class VideosController {
     return this.videos.getUploadConstraints();
   }
 
+  @Get('library')
+  library(@CurrentUser() auth: AuthContext) {
+    return this.videos.listLibrary(auth.userId);
+  }
+
   @Get()
   list(@CurrentUser() auth: AuthContext) {
     return this.videos.list(auth.userId);
@@ -58,7 +63,10 @@ export class VideosController {
 
   @Post()
   create(@CurrentUser() auth: AuthContext, @Body() dto: CreateVideoDto) {
-    return this.videos.createUpload(auth.userId, dto.title);
+    return this.videos.createUpload(auth.userId, dto.title, {
+      language: dto.language,
+      autoClips: dto.autoClips,
+    });
   }
 
   @Post(':id/upload-signature')

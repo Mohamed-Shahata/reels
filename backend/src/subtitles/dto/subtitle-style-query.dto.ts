@@ -11,10 +11,12 @@ import {
 } from 'class-validator';
 import {
   HEX_COLOR_PATTERN,
+  SUBTITLE_DISPLAY_MODES,
   SUBTITLE_FONT_SIZE_LIMITS,
   SUBTITLE_FONTS,
   SUBTITLE_POSITIONS,
   SUBTITLE_PRESET_IDS,
+  type SubtitleDisplayMode,
   type SubtitleFont,
   type SubtitlePosition,
   type SubtitlePresetId,
@@ -67,4 +69,8 @@ export class SubtitleStyleQueryDto {
   @IsOptional()
   @IsIn(SUBTITLE_POSITIONS)
   position?: SubtitlePosition;
+
+  @IsOptional()
+  @IsIn(SUBTITLE_DISPLAY_MODES)
+  displayMode?: SubtitleDisplayMode;
 }

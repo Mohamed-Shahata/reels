@@ -4,6 +4,7 @@ export const subtitleCatalog: SubtitleStyleCatalog = {
   defaultPresetId: 'REEL',
   fonts: ['Cairo', 'Amiri', 'Arial'],
   positions: ['TOP', 'MIDDLE', 'BOTTOM'],
+  displayModes: ['PHRASE', 'WORD'],
   fontSize: { min: 20, max: 72 },
   presets: [
     {
@@ -18,6 +19,7 @@ export const subtitleCatalog: SubtitleStyleCatalog = {
         backgroundColor: '#000000',
         backgroundOpacity: 0.63,
         position: 'BOTTOM',
+        displayMode: 'PHRASE',
       },
     },
     {
@@ -32,6 +34,7 @@ export const subtitleCatalog: SubtitleStyleCatalog = {
         backgroundColor: '#000000',
         backgroundOpacity: 0.85,
         position: 'MIDDLE',
+        displayMode: 'PHRASE',
       },
     },
     {
@@ -46,6 +49,7 @@ export const subtitleCatalog: SubtitleStyleCatalog = {
         backgroundColor: '#000000',
         backgroundOpacity: 0,
         position: 'TOP',
+        displayMode: 'PHRASE',
       },
     },
   ],

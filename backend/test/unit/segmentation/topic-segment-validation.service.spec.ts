@@ -139,4 +139,45 @@ describe('TopicSegmentValidationService', () => {
     ]);
     expect(request).toHaveBeenCalledTimes(2);
   });
+
+  describe('highlights', () => {
+    const moment = {
+      title: 'A sharp take',
+      startSec: 120,
+      endSec: 200,
+      summary: 'The guest explains why most advice fails.',
+      score: 8,
+    };
+
+    it('parses highlight moments with a score', () => {
+      expect(service.parseHighlights({ moments: [moment] })).toEqual([moment]);
+    });
+
+    it('accepts an empty list for a window without strong moments', () => {
+      expect(service.parseHighlights({ moments: [] })).toEqual([]);
+    });
+
+    it('rejects a moment without a score or with a score above ten', () => {
+      const withoutScore = { ...moment, score: undefined };
+
+      expect(() =>
+        service.parseHighlights({ moments: [withoutScore] }),
+      ).toThrow(SegmentationValidationError);
+      expect(() =>
+        service.parseHighlights({ moments: [{ ...moment, score: 11 }] }),
+      ).toThrow(SegmentationValidationError);
+    });
+
+    it('retries an invalid response until it gets a valid one', async () => {
+      const request = jest
+        .fn()
+        .mockResolvedValueOnce({ segments: [] })
+        .mockResolvedValueOnce({ moments: [moment] });
+
+      await expect(service.requestValidHighlights(request)).resolves.toEqual([
+        moment,
+      ]);
+      expect(request).toHaveBeenCalledTimes(2);
+    });
+  });
 });

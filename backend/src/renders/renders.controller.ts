@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -48,6 +49,46 @@ export class RendersController {
     @Param('videoId') videoId: string,
   ) {
     return this.renders.listForVideo(auth.userId, videoId);
+  }
+
+  @Delete('videos/:videoId/renders/subtitled')
+  deleteSubtitledForVideo(
+    @CurrentUser() auth: AuthContext,
+    @Param('videoId') videoId: string,
+  ) {
+    return this.renders.deleteSubtitledRenders(auth.userId, { videoId });
+  }
+
+  @Delete('clips/:clipId/renders/subtitled')
+  deleteSubtitledForClip(
+    @CurrentUser() auth: AuthContext,
+    @Param('clipId') clipId: string,
+  ) {
+    return this.renders.deleteSubtitledRenders(auth.userId, { clipId });
+  }
+
+  @Post('clips/:clipId/renders/stop')
+  @HttpCode(HttpStatus.OK)
+  stopForClip(
+    @CurrentUser() auth: AuthContext,
+    @Param('clipId') clipId: string,
+  ) {
+    return this.renders.stopForClip(auth.userId, clipId);
+  }
+
+  @Post('videos/:videoId/renders/stop')
+  @HttpCode(HttpStatus.OK)
+  stopForVideo(
+    @CurrentUser() auth: AuthContext,
+    @Param('videoId') videoId: string,
+  ) {
+    return this.renders.stopForVideo(auth.userId, videoId);
+  }
+
+  @Post('renders/:renderId/stop')
+  @HttpCode(HttpStatus.OK)
+  stop(@CurrentUser() auth: AuthContext, @Param('renderId') renderId: string) {
+    return this.renders.stop(auth.userId, renderId);
   }
 
   @Get('renders/:renderId/download')

@@ -7,10 +7,14 @@ export type RenderVariant =
 
 export type RendersByClipId = Record<string, ClipRender[]>;
 
+/** The error the server stores when the user stops a render. */
+export const RENDER_STOPPED_MESSAGE = 'Stopped by the user';
+
 export type ClipRenderState =
   | { kind: 'idle' }
   | { kind: 'active'; progress: number; queued: boolean }
   | { kind: 'ready' }
+  | { kind: 'stopped'; renderId: string }
   | { kind: 'failed'; renderId: string; message: string | null };
 
 export function isRenderActive(render: ClipRender): boolean {
@@ -27,6 +31,10 @@ export function getClipRenderState(
 ): ClipRenderState {
   if (!render || !isRenderCurrent(clip, render)) {
     return { kind: 'idle' };
+  }
+
+  if (render.status === 'FAILED' && render.error === RENDER_STOPPED_MESSAGE) {
+    return { kind: 'stopped', renderId: render.id };
   }
 
   if (render.status === 'FAILED') {
@@ -50,9 +58,14 @@ export interface RenderSummary {
   active: number;
   failed: number;
   pending: number;
+  /** Renders the user stopped; they are also counted in `pending`. */
+  stopped?: number;
 }
 
-function sameStyle(first: SubtitleStyle, second: SubtitleStyle): boolean {
+export function sameStyle(
+  first: SubtitleStyle,
+  second: SubtitleStyle,
+): boolean {
   return (
     first.fontFamily === second.fontFamily &&
     first.fontSizePx === second.fontSizePx &&
@@ -61,7 +74,8 @@ function sameStyle(first: SubtitleStyle, second: SubtitleStyle): boolean {
     first.backgroundColor.toLowerCase() ===
       second.backgroundColor.toLowerCase() &&
     first.backgroundOpacity === second.backgroundOpacity &&
-    first.position === second.position
+    first.position === second.position &&
+    first.displayMode === second.displayMode
   );
 }
 
@@ -111,7 +125,10 @@ export function summarizeRenders(
     if (state.kind === 'ready') summary.ready += 1;
     else if (state.kind === 'active') summary.active += 1;
     else if (state.kind === 'failed') summary.failed += 1;
-    else summary.pending += 1;
+    else if (state.kind === 'stopped') {
+      summary.pending += 1;
+      summary.stopped = (summary.stopped ?? 0) + 1;
+    } else summary.pending += 1;
   }
 
   return summary;
@@ -130,4 +147,35 @@ export function mergeRendersByClip(
     ];
   }
   return merged;
+}
+
+export function readyPercent(summary: RenderSummary): number {
+  if (summary.total === 0) return 0;
+  return Math.round((summary.ready / summary.total) * 100);
+}
+
+export function renderReference(renderId: string): string {
+  return renderId.slice(-8).toUpperCase();
+}
+
+/**
+ * Drops the finished and failed renders that have burned-in subtitles, the
+ * same ones the server deletes when the subtitle style or text changes.
+ * Renders still in progress stay, and so do renders without subtitles.
+ * `clipId` limits it to one clip.
+ */
+export function withoutSubtitledRenders(
+  current: RendersByClipId,
+  clipId?: string,
+): RendersByClipId {
+  const next: RendersByClipId = {};
+  for (const [id, renders] of Object.entries(current)) {
+    next[id] =
+      clipId !== undefined && id !== clipId
+        ? renders
+        : renders.filter(
+            (render) => !render.subtitles || isRenderActive(render),
+          );
+  }
+  return next;
 }

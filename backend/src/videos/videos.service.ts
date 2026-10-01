@@ -39,6 +39,33 @@ const libraryVideoSelect = {
   createdAt: true,
 } as const;
 
+const librarySummarySelect = {
+  ...libraryVideoSelect,
+  transcript: { select: { id: true } },
+  clips: {
+    select: { renders: { select: { outputUrl: true } } },
+  },
+  processingJobs: {
+    where: { type: 'TRANSCRIPTION' },
+    orderBy: { createdAt: 'desc' },
+    take: 1,
+    select: { status: true, progress: true, lastError: true },
+  },
+} as const;
+
+export type TranscriptionState =
+  'NONE' | 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+
+export interface LibraryVideoSummary extends LibraryVideo {
+  thumbnailUrl: string | null;
+  clipCount: number;
+  reelCount: number;
+  transcriptReady: boolean;
+  transcriptionState: TranscriptionState;
+  transcriptionProgress: number;
+  failureReason: string | null;
+}
+
 export interface CreatedVideo {
   id: string;
   title: string;
@@ -78,12 +105,20 @@ export class VideosService {
   async createUpload(
     userId: string,
     title: string,
+    options: { language?: string; autoClips?: boolean } = {},
   ): Promise<{
     video: CreatedVideo;
     upload: ReturnType<StorageService['createUploadSignature']>;
   }> {
     const video = await this.prisma.video.create({
-      data: { userId, title },
+      data: {
+        userId,
+        title,
+        ...(options.language ? { language: options.language } : {}),
+        ...(options.autoClips !== undefined
+          ? { autoClips: options.autoClips }
+          : {}),
+      },
       select: createdVideoSelect,
     });
 
@@ -106,6 +141,47 @@ export class VideosService {
     });
 
     return videos.map((video) => this.serializeLibraryVideo(video));
+  }
+
+  async listLibrary(userId: string): Promise<LibraryVideoSummary[]> {
+    const videos = await this.prisma.video.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      select: librarySummarySelect,
+    });
+
+    return videos.map((video) => {
+      const { transcript, clips, processingJobs, ...base } = video;
+      const job = processingJobs[0];
+      const transcriptReady = transcript !== null;
+      const reelCount = clips.reduce(
+        (total, clip) =>
+          total + clip.renders.filter((render) => render.outputUrl).length,
+        0,
+      );
+      let failureReason: string | null = null;
+      if (base.status === 'FAILED') {
+        failureReason = 'Upload could not be verified. Retry the upload.';
+      } else if (job?.status === 'FAILED') {
+        failureReason = job.lastError ?? 'Transcription failed.';
+      }
+
+      return {
+        ...this.serializeLibraryVideo(base),
+        thumbnailUrl:
+          base.status === 'READY' && base.cloudinaryId
+            ? this.storage.getVideoThumbnailUrl(base.cloudinaryId)
+            : null,
+        clipCount: clips.length,
+        reelCount,
+        transcriptReady,
+        transcriptionState: transcriptReady
+          ? 'COMPLETED'
+          : (job?.status ?? 'NONE'),
+        transcriptionProgress: job?.progress ?? 0,
+        failureReason,
+      };
+    });
   }
 
   async getPlaybackUrl(userId: string, videoId: string): Promise<string> {
@@ -151,7 +227,7 @@ export class VideosService {
   async startTranscription(userId: string, videoId: string) {
     const video = await this.prisma.video.findFirst({
       where: { id: videoId, userId, status: 'READY' },
-      select: { id: true },
+      select: { id: true, language: true },
     });
 
     if (!video) {
@@ -162,7 +238,7 @@ export class VideosService {
       userId,
       videoId,
       type: 'TRANSCRIPTION',
-      payload: { language: 'ar' },
+      payload: { language: video.language ?? 'ar' },
     });
   }
 

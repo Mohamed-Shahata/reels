@@ -20,5 +20,8 @@ export function useCueEdits() {
     setStore((current) => setClipEdits(current, clip, edits));
   }, []);
 
-  return { editsFor, setEdits };
+  /** Edits belong to one cue layout, so they are dropped when it changes. */
+  const clear = useCallback(() => setStore({}), []);
+
+  return { editsFor, setEdits, clear };
 }

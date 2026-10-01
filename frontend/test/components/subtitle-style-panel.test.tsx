@@ -24,6 +24,19 @@ function renderPanel(
 }
 
 describe('SubtitleStylePanel', () => {
+  it('offers undo only when there is something to undo', () => {
+    const onUndo = jest.fn();
+    renderPanel({ onUndo, canUndo: false });
+    expect(screen.getByRole('button', { name: /Undo changes/ })).toBeDisabled();
+  });
+
+  it('calls onUndo when undo is pressed', () => {
+    const onUndo = jest.fn();
+    renderPanel({ onUndo, canUndo: true });
+    fireEvent.click(screen.getByRole('button', { name: /Undo changes/ }));
+    expect(onUndo).toHaveBeenCalledTimes(1);
+  });
+
   it('shows a loading message until the styles arrive', () => {
     renderPanel({ catalog: null, selection: null });
 
@@ -63,13 +76,15 @@ describe('SubtitleStylePanel', () => {
     expect(handlers.onChoosePreset).toHaveBeenCalledWith('HIGHLIGHT');
   });
 
-  it('previews the current style', () => {
+  it('previews each preset with its own style', () => {
     renderPanel({
       selection: selectPreset(subtitleCatalog, 'HIGHLIGHT'),
     });
 
-    const preview = screen.getByTestId('subtitle-preview-text');
-    expect(preview).toHaveStyle({
+    const highlight = screen.getByRole('radio', { name: /Highlight/ });
+    expect(highlight).toHaveAttribute('aria-checked', 'true');
+    const sample = highlight.querySelector('[dir="rtl"]') as HTMLElement;
+    expect(sample).toHaveStyle({
       color: '#facc15',
       backgroundColor: 'rgba(0, 0, 0, 0.85)',
       fontWeight: '700',
@@ -79,13 +94,11 @@ describe('SubtitleStylePanel', () => {
   it('reports each control change as a style patch', () => {
     const handlers = renderPanel();
 
-    fireEvent.change(screen.getByLabelText('Font'), {
-      target: { value: 'Amiri' },
-    });
+    fireEvent.click(screen.getByRole('radio', { name: /Amiri/ }));
     fireEvent.change(screen.getByLabelText(/^Size/), {
       target: { value: '48' },
     });
-    fireEvent.click(screen.getByLabelText('Bold'));
+    fireEvent.click(screen.getByRole('radio', { name: 'Regular' }));
     fireEvent.change(screen.getByLabelText('Text color'), {
       target: { value: '#ff0000' },
     });
@@ -157,5 +170,21 @@ describe('SubtitleStylePanel', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reset to preset' }));
 
     expect(handlers.onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets the user choose phrases or word by word', () => {
+    const handlers = renderPanel();
+    const group = screen.getByRole('radiogroup', { name: 'Show subtitles as' });
+
+    expect(within(group).getAllByRole('radio')).toHaveLength(2);
+    expect(
+      within(group).getByRole('radio', { name: /Phrases/ }),
+    ).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(within(group).getByRole('radio', { name: /Word by word/ }));
+
+    expect(handlers.onChangeStyle).toHaveBeenCalledWith({
+      displayMode: 'WORD',
+    });
   });
 });

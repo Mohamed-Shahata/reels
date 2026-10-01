@@ -29,6 +29,7 @@ function subtitles(overrides: Partial<ClipSubtitles> = {}): ClipSubtitles {
   return {
     clipId: 'clip-1',
     language: 'ar',
+    displayMode: 'PHRASE',
     startSec: 10,
     endSec: 30,
     durationSec: 20,
@@ -72,7 +73,7 @@ describe('SubtitleTextEditor', () => {
 
     await openEditor();
 
-    expect(getClipSubtitles).toHaveBeenCalledWith('clip-1');
+    expect(getClipSubtitles).toHaveBeenCalledWith('clip-1', 'PHRASE');
     expect(screen.getByLabelText('Subtitle 1 text')).toHaveValue('Hello there');
     expect(screen.getByLabelText('Subtitle 2 text')).toHaveValue('Second line');
     expect(screen.getByText('0:00.5 to 0:02.0')).toBeInTheDocument();
@@ -209,5 +210,19 @@ describe('SubtitleTextEditor', () => {
       expect(screen.getByLabelText('Subtitle 1 text')).toBeInTheDocument(),
     );
     expect(getClipSubtitles).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for the cues of the chosen layout', async () => {
+    render(
+      <SubtitleTextEditor
+        clip={clip}
+        displayMode="WORD"
+        edits={[]}
+        onChange={jest.fn()}
+      />,
+    );
+    await openEditor();
+
+    expect(getClipSubtitles).toHaveBeenCalledWith('clip-1', 'WORD');
   });
 });

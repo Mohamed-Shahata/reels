@@ -1,23 +1,51 @@
 'use client';
 
-import { api, getApiErrorMessage, type LibraryVideo } from '@/lib/api';
+import {
+  api,
+  getApiErrorMessage,
+  type LibrarySummary,
+  type Usage,
+} from '@/lib/api';
+import {
+  filterVideos,
+  isCompleted,
+  isInProgress,
+  sortVideos,
+  type LibraryFilter,
+  type LibrarySort,
+} from '@/lib/library-filters';
 import { clearPendingUploadByVideoId } from '@/lib/upload-store';
 import { useAuth } from '@/components/auth/auth-provider';
+import { AppFooter } from '@/components/layout/app-footer';
+import { AppHeader } from '@/components/layout/app-header';
 import { PageLoading } from '@/components/common/page-loading';
+import {
+  AlertBanner,
+  EmptyState,
+  LibrarySkeleton,
+  useToast,
+} from '@/components/feedback';
+import { VideoCard, type CardMode } from '@/components/workspace/video-card';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+const POLL_INTERVAL_MS = 5000;
 
 export default function Home() {
-  const { logout, status, user } = useAuth();
+  const { status, user } = useAuth();
   const router = useRouter();
-  const [loggingOut, setLoggingOut] = useState(false);
-  const [videos, setVideos] = useState<LibraryVideo[]>([]);
+  const toast = useToast();
+  const [videos, setVideos] = useState<LibrarySummary[]>([]);
+  const [usage, setUsage] = useState<Usage | null>(null);
   const [loadingVideos, setLoadingVideos] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<LibraryFilter>('all');
+  const [sort, setSort] = useState<LibrarySort>('recent');
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [mode, setMode] = useState<CardMode>('view');
   const [draftTitle, setDraftTitle] = useState('');
-  const [savingId, setSavingId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -25,29 +53,74 @@ export default function Home() {
     }
   }, [router, status]);
 
-  useEffect(() => {
-    if (status !== 'authenticated') return;
-
-    api
-      .getVideos()
-      .then(setVideos)
-      .catch((requestError) => {
+  const loadLibrary = useCallback(async (initial: boolean) => {
+    try {
+      setVideos(await api.getLibrary());
+      if (initial) setError(null);
+    } catch (requestError) {
+      if (initial) {
         setError(
           getApiErrorMessage(requestError, 'Videos could not be loaded.'),
         );
-      })
-      .finally(() => setLoadingVideos(false));
-  }, [status]);
+      }
+    } finally {
+      if (initial) setLoadingVideos(false);
+    }
+  }, []);
 
-  async function handleLogout() {
-    setLoggingOut(true);
-    await logout();
-    router.replace('/login');
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    const timer = window.setTimeout(() => {
+      void loadLibrary(true);
+      api
+        .getUsage()
+        .then(setUsage)
+        .catch(() => setUsage(null));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadLibrary, status]);
+
+  const hasActiveWork = useMemo(() => videos.some(isInProgress), [videos]);
+
+  useEffect(() => {
+    if (!hasActiveWork) return;
+    const timer = window.setInterval(
+      () => void loadLibrary(false),
+      POLL_INTERVAL_MS,
+    );
+    return () => window.clearInterval(timer);
+  }, [hasActiveWork, loadLibrary]);
+
+  const counts = useMemo(
+    () => ({
+      all: videos.length,
+      completed: videos.filter(isCompleted).length,
+      'in-progress': videos.filter(isInProgress).length,
+    }),
+    [videos],
+  );
+
+  const visibleVideos = useMemo(
+    () => sortVideos(filterVideos(videos, filter), sort),
+    [filter, sort, videos],
+  );
+
+  function resetCard() {
+    setActiveId(null);
+    setMode('view');
+    setDraftTitle('');
   }
 
-  function beginRename(video: LibraryVideo) {
-    setEditingId(video.id);
+  function beginRename(video: LibrarySummary) {
+    setActiveId(video.id);
+    setMode('renaming');
     setDraftTitle(video.title);
+    setError(null);
+  }
+
+  function beginDelete(video: LibrarySummary) {
+    setActiveId(video.id);
+    setMode('confirming-delete');
     setError(null);
   }
 
@@ -55,36 +128,37 @@ export default function Home() {
     const title = draftTitle.trim();
     if (!title) return;
 
-    setSavingId(videoId);
+    setBusyId(videoId);
     setError(null);
     try {
       const updated = await api.renameVideo(videoId, title);
       setVideos((current) =>
-        current.map((video) => (video.id === videoId ? updated : video)),
+        current.map((video) =>
+          video.id === videoId ? { ...video, title: updated.title } : video,
+        ),
       );
-      setEditingId(null);
+      resetCard();
+      toast.show({ title: 'Video renamed', description: updated.title });
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, 'Video could not be renamed.'));
     } finally {
-      setSavingId(null);
+      setBusyId(null);
     }
   }
 
-  async function removeVideo(video: LibraryVideo) {
-    if (!window.confirm(`Delete "${video.title}"? This cannot be undone.`)) {
-      return;
-    }
-
-    setSavingId(video.id);
+  async function removeVideo(videoId: string) {
+    setBusyId(videoId);
     setError(null);
     try {
-      await api.deleteVideo(video.id);
-      clearPendingUploadByVideoId(video.id);
-      setVideos((current) => current.filter((item) => item.id !== video.id));
+      await api.deleteVideo(videoId);
+      clearPendingUploadByVideoId(videoId);
+      setVideos((current) => current.filter((video) => video.id !== videoId));
+      resetCard();
+      toast.show({ title: 'Video deleted' });
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, 'Video could not be deleted.'));
     } finally {
-      setSavingId(null);
+      setBusyId(null);
     }
   }
 
@@ -96,169 +170,158 @@ export default function Home() {
     return null;
   }
 
+  const aiPercent = usage
+    ? Math.min(100, Math.round((usage.aiRuns / usage.aiRunLimit) * 100))
+    : 0;
+
+  const tabs: { id: LibraryFilter; label: string }[] = [
+    { id: 'all', label: 'All Videos' },
+    { id: 'completed', label: 'Completed Reels' },
+    { id: 'in-progress', label: 'In Progress' },
+  ];
+
   return (
-    <main className="min-h-screen bg-[#f6f8f7] text-[#172321]">
-      <header className="flex min-h-16 items-center justify-between border-b border-[#d8e1dc] bg-white px-5 sm:px-8">
-        <span className="text-sm font-semibold tracking-[0.16em] text-[#123b3a]">
-          PODCAST REELS
-        </span>
-        <div className="flex items-center gap-4">
-          <span className="hidden text-sm text-[#5f6e69] sm:inline">
-            {user.email}
-          </span>
-          <button
-            className="h-9 border border-[#a9bab3] px-3 text-sm font-medium text-[#263532] transition hover:border-[#0f766e] hover:text-[#0f766e] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={loggingOut}
-            onClick={() => void handleLogout()}
-            type="button"
-          >
-            {loggingOut ? 'Signing out' : 'Sign out'}
-          </button>
-        </div>
-      </header>
-      <section className="mx-auto max-w-5xl px-5 py-12 sm:px-8">
-        <div className="w-full">
-          <p className="text-sm font-medium text-[#0f766e]">Workspace</p>
-          <div className="mt-3 flex flex-wrap items-end justify-between gap-5">
-            <div>
-              <h1 className="text-3xl font-semibold sm:text-4xl">
-                Your videos
-              </h1>
-              <p className="mt-3 text-base text-[#5f6e69]">
-                Upload a podcast to start creating clips.
-              </p>
-            </div>
+    <div className="flex min-h-screen flex-col bg-[#f2f9f6] text-[#172321]">
+      <AppHeader />
+
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 sm:px-8">
+        <p className="font-mono text-[11px] font-semibold tracking-[0.14em] text-[#0f766e]">
+          WORKSPACE
+        </p>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-5">
+          <div>
+            <h1 className="text-3xl font-bold">Your videos</h1>
+            <p className="mt-2 text-sm text-[#5d6d68]">
+              Convert Arabic episodes and streams into high-impact 9:16 vertical
+              shorts.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            {usage ? (
+              <div className="min-w-44 rounded-lg border border-[#dfe6e2] bg-white px-3 py-2">
+                <div className="flex items-center justify-between font-mono text-[10px] text-[#5d6d68]">
+                  <span>AI runs this month</span>
+                  <span className="font-semibold text-[#172321]">
+                    {usage.aiRuns} of {usage.aiRunLimit}
+                  </span>
+                </div>
+                <div
+                  aria-label="AI runs used this month"
+                  aria-valuemax={usage.aiRunLimit}
+                  aria-valuemin={0}
+                  aria-valuenow={usage.aiRuns}
+                  className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[#e3e9e6]"
+                  role="progressbar"
+                >
+                  <div
+                    className="h-full rounded-full bg-[#0f766e]"
+                    style={{ width: `${aiPercent}%` }}
+                  />
+                </div>
+              </div>
+            ) : null}
             <Link
-              className="inline-flex h-11 items-center bg-[#0f766e] px-5 text-sm font-semibold text-white transition hover:bg-[#0b615b]"
+              className="inline-flex h-11 items-center rounded-lg bg-[#0f766e] px-5 text-sm font-semibold text-white transition hover:bg-[#0b615b]"
               href="/videos/new"
             >
               Upload video
             </Link>
           </div>
-          {error ? (
-            <p
-              className="mt-8 border-l-2 border-[#c44932] bg-[#fff2ef] px-3 py-2 text-sm text-[#8f2f1f]"
-              role="alert"
-            >
-              {error}
-            </p>
-          ) : null}
-          <div className="mt-12 border-t border-[#d8e1dc]">
-            {loadingVideos ? (
-              <p className="py-10 text-sm text-[#5f6e69]">Loading videos...</p>
-            ) : videos.length === 0 ? (
-              <p className="py-10 text-sm text-[#5f6e69]">
-                No videos uploaded yet.
-              </p>
-            ) : (
-              <ul>
-                {videos.map((video) => {
-                  const editing = editingId === video.id;
-                  const saving = savingId === video.id;
-
-                  return (
-                    <li
-                      className="grid gap-4 border-b border-[#d8e1dc] py-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-                      key={video.id}
-                    >
-                      <div className="min-w-0">
-                        {editing ? (
-                          <input
-                            aria-label="Video title"
-                            className="h-10 w-full max-w-xl border border-[#0f766e] px-3 text-base font-semibold outline-none ring-2 ring-[#0f766e]/20"
-                            disabled={saving}
-                            onChange={(event) =>
-                              setDraftTitle(event.target.value)
-                            }
-                            value={draftTitle}
-                          />
-                        ) : video.status === 'READY' ? (
-                          <Link
-                            className="block truncate text-lg font-semibold hover:text-[#0f766e]"
-                            href={`/videos/${video.id}`}
-                          >
-                            {video.title}
-                          </Link>
-                        ) : (
-                          <h2 className="truncate text-lg font-semibold">
-                            {video.title}
-                          </h2>
-                        )}
-                        <p className="mt-1 text-sm text-[#5f6e69]">
-                          {formatStatus(video.status)} ·{' '}
-                          {formatDate(video.createdAt)}
-                          {video.durationSec
-                            ? ` · ${formatDuration(video.durationSec)}`
-                            : ''}
-                        </p>
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        {editing ? (
-                          <>
-                            <button
-                              className="h-9 bg-[#0f766e] px-3 text-sm font-semibold text-white disabled:opacity-50"
-                              disabled={saving || !draftTitle.trim()}
-                              onClick={() => void saveRename(video.id)}
-                              type="button"
-                            >
-                              Save
-                            </button>
-                            <button
-                              className="h-9 border border-[#a9bab3] px-3 text-sm font-medium text-[#263532]"
-                              disabled={saving}
-                              onClick={() => setEditingId(null)}
-                              type="button"
-                            >
-                              Cancel
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              className="h-9 border border-[#a9bab3] px-3 text-sm font-medium text-[#263532] hover:border-[#0f766e] hover:text-[#0f766e] disabled:opacity-50"
-                              disabled={saving}
-                              onClick={() => beginRename(video)}
-                              type="button"
-                            >
-                              Rename
-                            </button>
-                            <button
-                              className="h-9 border border-[#d5a49a] px-3 text-sm font-medium text-[#8f2f1f] hover:border-[#c44932] disabled:opacity-50"
-                              disabled={saving}
-                              onClick={() => void removeVideo(video)}
-                              type="button"
-                            >
-                              {saving ? 'Deleting' : 'Delete'}
-                            </button>
-                          </>
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
         </div>
-      </section>
-    </main>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2" role="tablist">
+            {tabs.map((tab) => (
+              <button
+                aria-selected={filter === tab.id}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                  filter === tab.id
+                    ? 'border-[#0f766e] bg-[#0f766e] text-white'
+                    : 'border-[#d5dcd8] bg-white text-[#263532] hover:border-[#0f766e]'
+                }`}
+                key={tab.id}
+                onClick={() => setFilter(tab.id)}
+                role="tab"
+                type="button"
+              >
+                {tab.label} ({counts[tab.id]})
+              </button>
+            ))}
+          </div>
+          <label className="flex items-center gap-2 text-xs text-[#5d6d68]">
+            Sort by:
+            <select
+              className="h-8 rounded-md border border-[#d5dcd8] bg-white px-2 text-xs font-medium text-[#172321]"
+              onChange={(event) => setSort(event.target.value as LibrarySort)}
+              value={sort}
+            >
+              <option value="recent">Recently Uploaded</option>
+              <option value="oldest">Oldest First</option>
+              <option value="title">Title (A–Z)</option>
+              <option value="duration">Longest First</option>
+            </select>
+          </label>
+        </div>
+
+        {error ? (
+          <AlertBanner
+            className="mt-5"
+            onDismiss={() => setError(null)}
+            title="Something went wrong"
+          >
+            {error}
+          </AlertBanner>
+        ) : null}
+
+        <div className="mt-6">
+          {loadingVideos ? (
+            <LibrarySkeleton />
+          ) : visibleVideos.length === 0 ? (
+            <EmptyState
+              action={
+                videos.length === 0 ? (
+                  <Link
+                    className="inline-flex h-10 items-center rounded-lg bg-[#0f766e] px-4 text-sm font-semibold text-white"
+                    href="/videos/new"
+                  >
+                    Upload video
+                  </Link>
+                ) : null
+              }
+              description={
+                videos.length === 0
+                  ? 'Upload a podcast to start creating reels.'
+                  : 'Try another tab to see the rest of your library.'
+              }
+              title={
+                videos.length === 0
+                  ? 'No videos uploaded yet'
+                  : 'No videos match this filter'
+              }
+            />
+          ) : (
+            <ul className="grid items-start gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleVideos.map((video) => (
+                <VideoCard
+                  busy={busyId === video.id}
+                  draftTitle={draftTitle}
+                  key={video.id}
+                  mode={activeId === video.id ? mode : 'view'}
+                  onBeginDelete={() => beginDelete(video)}
+                  onBeginRename={() => beginRename(video)}
+                  onCancel={resetCard}
+                  onConfirmDelete={() => void removeVideo(video.id)}
+                  onDraftChange={setDraftTitle}
+                  onSaveRename={() => void saveRename(video.id)}
+                  video={video}
+                />
+              ))}
+            </ul>
+          )}
+        </div>
+      </main>
+
+      <AppFooter />
+    </div>
   );
-}
-
-function formatStatus(status: LibraryVideo['status']): string {
-  return status.charAt(0) + status.slice(1).toLowerCase();
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('en', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(value));
-}
-
-function formatDuration(durationSec: number): string {
-  const minutes = Math.floor(durationSec / 60);
-  const seconds = Math.floor(durationSec % 60);
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }

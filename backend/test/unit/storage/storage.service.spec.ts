@@ -268,10 +268,76 @@ describe('StorageService', () => {
     explicit.mockRestore();
   });
 
-  it('stores the subtitle layers as a named transformation and references it after the reframe', async () => {
-    const create = jest
+  it('creates named transformations with one text layer per cue and references them', async () => {
+    const createTransformation = jest
       .spyOn(cloudinary.api, 'create_transformation')
       .mockResolvedValue({});
+    const upload = jest
+      .spyOn(cloudinary.uploader, 'upload')
+      .mockResolvedValue({} as never);
+    const explicit = jest
+      .spyOn(cloudinary.uploader, 'explicit')
+      .mockResolvedValue({});
+    const url = jest.spyOn(cloudinary, 'url').mockReturnValue('https://x');
+    const cues = Array.from({ length: 40 }, (_, i) => ({
+      index: i + 1,
+      startSec: i,
+      endSec: i + 0.5,
+      text: 'تتفاوض',
+    }));
+
+    await createService().startClipReelRender('video-1', 10, 60, {
+      style: getSubtitlePreset('REEL').style,
+      cues,
+    });
+
+    // The cues are split over several short definitions.
+    expect(createTransformation.mock.calls.length).toBeGreaterThan(1);
+    for (const [name, definition] of createTransformation.mock.calls) {
+      expect(name).toMatch(/^reelsubs_[0-9a-f]{24}$/);
+      const definitionText =
+        typeof definition === 'string'
+          ? definition
+          : JSON.stringify(definition);
+      expect(definitionText.length).toBeLessThan(2000);
+      expect(definitionText).toContain('l_text:Cairo_');
+      expect(definitionText).toContain('fl_layer_apply');
+    }
+    expect(upload).not.toHaveBeenCalled();
+
+    const transformation = (
+      explicit.mock.calls[0][1] as unknown as {
+        eager: { transformation: Record<string, unknown>[] }[];
+      }
+    ).eager[0].transformation;
+    expect(transformation[1]).toMatchObject({ aspect_ratio: '9:16' });
+    expect(transformation.slice(2).map((part) => part.transformation)).toEqual(
+      createTransformation.mock.calls.map(([name]) => name),
+    );
+    createTransformation.mockRestore();
+    upload.mockRestore();
+    explicit.mockRestore();
+    url.mockRestore();
+  });
+
+  it('treats an already existing named transformation as created', async () => {
+    const createTransformation = jest
+      .spyOn(cloudinary.api, 'create_transformation')
+      .mockRejectedValue({ http_code: 409, message: 'already exists' });
+
+    await expect(
+      createService().ensureSubtitleFile({
+        style: getSubtitlePreset('REEL').style,
+        cues: [{ index: 1, startSec: 1, endSec: 2, text: 'Hello' }],
+      }),
+    ).resolves.toBeUndefined();
+    createTransformation.mockRestore();
+  });
+
+  it('uploads the cues as an SRT file and references it after the reframe', async () => {
+    const upload = jest
+      .spyOn(cloudinary.uploader, 'upload')
+      .mockResolvedValue({} as never);
     const explicit = jest
       .spyOn(cloudinary.uploader, 'explicit')
       .mockResolvedValue({});
@@ -281,16 +347,23 @@ describe('StorageService', () => {
       cues: [{ index: 1, startSec: 1, endSec: 2, text: 'Hello' }],
     };
 
-    await createService().startClipReelRender('video-1', 10, 30, burnIn);
+    await createService({
+      SUBTITLE_BURN_MODE: 'SRT',
+    }).startClipReelRender('video-1', 10, 30, burnIn);
 
-    const [name, definition] = create.mock.calls[0] as unknown as [
+    const srtCall = upload.mock.calls.find((call) =>
+      String((call[1] as { public_id?: string }).public_id).endsWith('.srt'),
+    );
+    const [data, options] = srtCall as unknown as [
       string,
-      string,
+      { resource_type: string; public_id: string },
     ];
-    expect(name).toMatch(/^subs_[0-9a-f]{24}$/);
-    expect(definition).toContain('l_text:Cairo_51_bold_center:Hello');
-    expect(definition).toContain('so_1');
-    expect(create.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(options.resource_type).toBe('raw');
+    expect(options.public_id).toMatch(/^reelsubs[0-9a-f]{24}\.srt$/);
+    const srt = Buffer.from(data.split(',')[1], 'base64').toString('utf8');
+    expect(srt).toContain('00:00:01,000 --> 00:00:02,000');
+    expect(srt).toContain('Hello');
+    expect(Math.max(...upload.mock.invocationCallOrder)).toBeLessThan(
       explicit.mock.invocationCallOrder[0],
     );
 
@@ -299,58 +372,44 @@ describe('StorageService', () => {
         eager: { transformation: Record<string, unknown>[] }[];
       }
     ).eager[0].transformation;
-    expect(transformation).toHaveLength(3);
+    expect(transformation).toHaveLength(4);
     expect(transformation[1]).toMatchObject({ aspect_ratio: '9:16' });
-    expect(transformation[2]).toEqual({ transformation: name });
-    expect(url).toHaveBeenCalledWith(
-      'video-1',
-      expect.objectContaining({ transformation }),
-    );
-    create.mockRestore();
+    expect(transformation[2]).toMatchObject({
+      overlay: {
+        resource_type: 'subtitles',
+        public_id: options.public_id,
+        font_family: 'Cairo',
+      },
+    });
+    expect(transformation[3]).toMatchObject({ flags: 'layer_apply' });
+    upload.mockRestore();
     explicit.mockRestore();
     url.mockRestore();
   });
 
-  it('keeps going when the named transformation already exists', async () => {
-    const create = jest
-      .spyOn(cloudinary.api, 'create_transformation')
-      .mockRejectedValue({
-        error: { http_code: 409, message: 'already exists' },
-      });
-    const explicit = jest
-      .spyOn(cloudinary.uploader, 'explicit')
-      .mockResolvedValue({});
-    const url = jest.spyOn(cloudinary, 'url').mockReturnValue('https://x');
+  it('fails with a readable message when the subtitle file cannot be uploaded', async () => {
+    const upload = jest
+      .spyOn(cloudinary.uploader, 'upload')
+      .mockRejectedValue({ error: { http_code: 400, message: 'bad file' } });
 
     await expect(
-      createService().startClipReelRender('video-1', 10, 30, {
-        style: getSubtitlePreset('REEL').style,
-        cues: [{ index: 1, startSec: 1, endSec: 2, text: 'Hello' }],
-      }),
-    ).resolves.toBe('https://x');
-    create.mockRestore();
-    explicit.mockRestore();
-    url.mockRestore();
+      createService({ SUBTITLE_BURN_MODE: 'SRT' }).startClipReelRender(
+        'video-1',
+        10,
+        30,
+        {
+          style: getSubtitlePreset('REEL').style,
+          cues: [{ index: 1, startSec: 1, endSec: 2, text: 'Hello' }],
+        },
+      ),
+    ).rejects.toThrow('bad file (HTTP 400)');
+    upload.mockRestore();
   });
 
-  it('fails when the named transformation cannot be created', async () => {
-    const create = jest
-      .spyOn(cloudinary.api, 'create_transformation')
-      .mockRejectedValue({ error: { http_code: 400, message: 'too long' } });
-
-    await expect(
-      createService().startClipReelRender('video-1', 10, 30, {
-        style: getSubtitlePreset('REEL').style,
-        cues: [{ index: 1, startSec: 1, endSec: 2, text: 'Hello' }],
-      }),
-    ).rejects.toBeDefined();
-    create.mockRestore();
-  });
-
-  it('gives the same name to the same subtitles and a short URL for many cues', async () => {
-    const create = jest
-      .spyOn(cloudinary.api, 'create_transformation')
-      .mockResolvedValue({});
+  it('uses one file and a short transformation however many cues there are', async () => {
+    const upload = jest
+      .spyOn(cloudinary.uploader, 'upload')
+      .mockResolvedValue({} as never);
     const explicit = jest
       .spyOn(cloudinary.uploader, 'explicit')
       .mockResolvedValue({});
@@ -362,31 +421,69 @@ describe('StorageService', () => {
     }));
     const burnIn = { style: getSubtitlePreset('REEL').style, cues };
 
-    await createService().startClipReelRender('video-1', 0, 360, burnIn);
-    await createService().startClipReelRender('video-1', 0, 360, burnIn);
+    const srtService = () => createService({ SUBTITLE_BURN_MODE: 'SRT' });
+    await srtService().startClipReelRender('video-1', 0, 360, burnIn);
+    await srtService().startClipReelRender('video-1', 0, 360, burnIn);
 
-    expect(create.mock.calls[0][0]).toBe(create.mock.calls[1][0]);
+    const srtIds = upload.mock.calls
+      .map((call) => (call[1] as unknown as { public_id: string }).public_id)
+      .filter((id) => id.endsWith('.srt'));
+    expect(srtIds).toHaveLength(2);
+    expect(srtIds[0]).toBe(srtIds[1]);
     const eager = explicit.mock.calls[0][1] as unknown as {
       eager: { transformation: unknown[] }[];
     };
-    expect(eager.eager[0].transformation).toHaveLength(3);
-    create.mockRestore();
+    expect(eager.eager[0].transformation).toHaveLength(4);
+    upload.mockRestore();
     explicit.mockRestore();
   });
 
-  it('does not create a transformation for a clip without speech', async () => {
-    const create = jest.spyOn(cloudinary.api, 'create_transformation');
+  it('uploads the Cairo font once for Cairo subtitles', async () => {
+    const upload = jest
+      .spyOn(cloudinary.uploader, 'upload')
+      .mockResolvedValue({} as never);
+    const explicit = jest
+      .spyOn(cloudinary.uploader, 'explicit')
+      .mockResolvedValue({});
+    const burnIn = {
+      style: getSubtitlePreset('REEL').style,
+      cues: [{ index: 1, startSec: 1, endSec: 2, text: 'Hello' }],
+    };
+
+    const service = createService({ SUBTITLE_BURN_MODE: 'SRT' });
+    await service.startClipReelRender('video-1', 0, 30, burnIn);
+    await service.startClipReelRender('video-1', 0, 30, burnIn);
+
+    const fontCalls = upload.mock.calls.filter(
+      (call) => (call[1] as { public_id?: string }).public_id === 'Cairo.ttf',
+    );
+    expect(fontCalls).toHaveLength(1);
+    expect(fontCalls[0][1]).toMatchObject({
+      resource_type: 'raw',
+      type: 'authenticated',
+    });
+    upload.mockRestore();
+    explicit.mockRestore();
+  });
+
+  it('does not upload a file for a clip without speech', async () => {
+    const upload = jest.spyOn(cloudinary.uploader, 'upload');
     const explicit = jest
       .spyOn(cloudinary.uploader, 'explicit')
       .mockResolvedValue({});
 
-    await createService().startClipReelRender('video-1', 10, 30, {
-      style: getSubtitlePreset('REEL').style,
-      cues: [],
-    });
+    await createService({ SUBTITLE_BURN_MODE: 'SRT' }).startClipReelRender(
+      'video-1',
+      10,
+      30,
+      {
+        style: getSubtitlePreset('REEL').style,
+        cues: [],
+      },
+    );
 
-    expect(create).not.toHaveBeenCalled();
-    create.mockRestore();
+    expect(upload).not.toHaveBeenCalled();
+    upload.mockRestore();
     explicit.mockRestore();
   });
 
@@ -397,10 +494,16 @@ describe('StorageService', () => {
       cues: [{ index: 1, startSec: 1, endSec: 2, text: 'Hello' }],
     };
 
-    createService().getClipDownloadUrl('video-1', 10, 30, 'clip-1', {
-      reframe: true,
-      subtitles: burnIn,
-    });
+    createService({ SUBTITLE_BURN_MODE: 'SRT' }).getClipDownloadUrl(
+      'video-1',
+      10,
+      30,
+      'clip-1',
+      {
+        reframe: true,
+        subtitles: burnIn,
+      },
+    );
 
     expect(url).toHaveBeenCalledWith(
       'video-1',
@@ -408,7 +511,9 @@ describe('StorageService', () => {
         flags: 'streaming_attachment:clip-1',
         transformation: expect.arrayContaining([
           expect.objectContaining({
-            transformation: expect.stringMatching(/^subs_/) as unknown,
+            overlay: expect.objectContaining({
+              resource_type: 'subtitles',
+            }) as unknown,
           }),
         ]) as unknown,
       }),

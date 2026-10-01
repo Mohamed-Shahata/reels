@@ -13,6 +13,11 @@ export class InMemoryProcessingQueueService implements ProcessingQueueClient {
     return Promise.resolve();
   }
 
+  remove(processingJobId: string): Promise<void> {
+    this.enqueued.delete(processingJobId);
+    return Promise.resolve();
+  }
+
   ensureQueued(payload: ProcessingQueueJobPayload): Promise<void> {
     if (!this.enqueued.has(payload.processingJobId)) {
       return this.enqueue(payload);

@@ -3,8 +3,11 @@ import {
   getClipRenderState,
   mergeRendersByClip,
   pickRender,
+  readyPercent,
+  renderReference,
   renderMatchesVariant,
   summarizeRenders,
+  withoutSubtitledRenders,
   type RenderVariant,
 } from '@/lib/clip-render';
 
@@ -16,6 +19,7 @@ const reelStyle: SubtitleStyle = {
   backgroundColor: '#000000',
   backgroundOpacity: 0.63,
   position: 'BOTTOM',
+  displayMode: 'PHRASE',
 };
 const plain: RenderVariant = { subtitles: false };
 const withReel: RenderVariant = { subtitles: true, style: reelStyle };
@@ -312,5 +316,72 @@ describe('edited subtitle text', () => {
 
     expect(pickRender([unedited, withEdits], edited)?.id).toBe('edited');
     expect(pickRender([unedited, withEdits], withReel)?.id).toBe('plain');
+  });
+});
+
+describe('readyPercent and renderReference', () => {
+  it('rounds the share of ready clips and handles an empty list', () => {
+    const base = { total: 3, ready: 1, active: 0, failed: 0, pending: 2 };
+    expect(readyPercent(base)).toBe(33);
+    expect(readyPercent({ ...base, total: 0, ready: 0 })).toBe(0);
+  });
+
+  it('uses the last 8 characters of the render id as a reference', () => {
+    expect(renderReference('cmabc12345678')).toBe('12345678');
+    expect(renderReference('abcdefgh')).toBe('ABCDEFGH');
+  });
+});
+
+describe('withoutSubtitledRenders', () => {
+  const make = (id: string, subtitles: boolean, status: ClipRender['status']) =>
+    ({ id, subtitles, status }) as ClipRender;
+
+  const current = {
+    a: [
+      make('a-plain', false, 'COMPLETED'),
+      make('a-done', true, 'COMPLETED'),
+      make('a-failed', true, 'FAILED'),
+      make('a-running', true, 'RUNNING'),
+    ],
+    b: [make('b-done', true, 'COMPLETED')],
+  };
+
+  it('drops finished and failed subtitled renders but keeps the rest', () => {
+    const next = withoutSubtitledRenders(current);
+    expect(next.a.map((r) => r.id)).toEqual(['a-plain', 'a-running']);
+    expect(next.b).toEqual([]);
+  });
+
+  it('only touches the given clip', () => {
+    const next = withoutSubtitledRenders(current, 'b');
+    expect(next.a).toBe(current.a);
+    expect(next.b).toEqual([]);
+  });
+});
+
+describe('stopped renders', () => {
+  it('tells a stopped render apart from a failed one', () => {
+    const stopped = render({ status: 'FAILED', error: 'Stopped by the user' });
+    const failed = render({ status: 'FAILED', error: 'Cloudinary error' });
+
+    expect(getClipRenderState(clip(), stopped)).toEqual({
+      kind: 'stopped',
+      renderId: 'render-1',
+    });
+    expect(getClipRenderState(clip(), failed)).toMatchObject({
+      kind: 'failed',
+    });
+  });
+
+  it('counts stopped clips as still to render', () => {
+    const summary = summarizeRenders(
+      [clip()],
+      {
+        'clip-1': [render({ status: 'FAILED', error: 'Stopped by the user' })],
+      },
+      () => plain,
+    );
+
+    expect(summary).toMatchObject({ pending: 1, failed: 0, stopped: 1 });
   });
 });

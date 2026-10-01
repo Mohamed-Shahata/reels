@@ -76,7 +76,9 @@ describe('ClipRenderControls', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Not rendered');
     fireEvent.click(screen.getByRole('button', { name: 'Render 9:16' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Preview 9:16' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Preview 9:16 reel for Takeaway' }),
+    );
 
     expect(handlers.onRender).toHaveBeenCalledTimes(1);
     expect(handlers.onPreview).toHaveBeenCalledTimes(1);
@@ -143,7 +145,9 @@ describe('ClipRenderControls', () => {
     expect(
       screen.getByRole('button', { name: 'Starting render' }),
     ).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Preview 9:16' })).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'Preview 9:16 reel for Takeaway' }),
+    ).toBeDisabled();
   });
 });
 
@@ -188,6 +192,26 @@ describe('ClipRenderControls subtitle toggle', () => {
   });
 });
 
+describe('ClipRenderControls progress and failure details', () => {
+  it('shows a progress bar while rendering', () => {
+    renderControls(clipRender({ status: 'RUNNING', progress: 42 }));
+
+    expect(
+      screen.getByRole('progressbar', { name: /Render progress for Takeaway/ }),
+    ).toHaveAttribute('aria-valuenow', '42');
+    expect(screen.getByText('Processing video...')).toBeInTheDocument();
+  });
+
+  it('shows a reference ID for a failed render', () => {
+    renderControls(
+      clipRender({ id: 'cmabc12345678', status: 'FAILED', error: 'Boom' }),
+    );
+
+    expect(screen.getByText('Boom')).toBeInTheDocument();
+    expect(screen.getByText('Reference ID: 12345678')).toBeInTheDocument();
+  });
+});
+
 describe('BulkRenderControls', () => {
   const summary = { total: 4, ready: 1, active: 1, failed: 1, pending: 1 };
 
@@ -210,6 +234,24 @@ describe('BulkRenderControls', () => {
     );
 
     expect(onRenderAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the share of clips ready for export', () => {
+    render(
+      <BulkRenderControls
+        {...bulkToggleProps}
+        busy={false}
+        onRenderAll={jest.fn()}
+        summary={summary}
+      />,
+    );
+
+    expect(screen.getByText('25% ready for export')).toBeInTheDocument();
+    expect(
+      screen.getByRole('progressbar', {
+        name: 'Render progress for all clips',
+      }),
+    ).toHaveAttribute('aria-valuenow', '25');
   });
 
   it('is disabled while the request is being sent', () => {
@@ -321,5 +363,93 @@ describe('BulkRenderControls', () => {
     expect(
       screen.getByRole('checkbox', { name: 'Burn in subtitles for all clips' }),
     ).toBeDisabled();
+  });
+});
+
+describe('stopping renders', () => {
+  it('stops the render in progress of a clip', () => {
+    const onStop = jest.fn();
+    render(
+      <ClipRenderControls
+        burnSubtitles={false}
+        busy={false}
+        clip={clip}
+        onDownload={jest.fn()}
+        onPreview={jest.fn()}
+        onRender={jest.fn()}
+        onRetry={jest.fn()}
+        onStop={onStop}
+        onToggleSubtitles={jest.fn()}
+        render={clipRender({ status: 'RUNNING', progress: 40 })}
+        subtitlesAvailable
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /stop rendering/i }));
+
+    expect(onStop).toHaveBeenCalledWith('render-1');
+  });
+
+  it('offers to resume a stopped render instead of showing a failure', () => {
+    const onRetry = jest.fn();
+    render(
+      <ClipRenderControls
+        burnSubtitles={false}
+        busy={false}
+        clip={clip}
+        onDownload={jest.fn()}
+        onPreview={jest.fn()}
+        onRender={jest.fn()}
+        onRetry={onRetry}
+        onStop={jest.fn()}
+        onToggleSubtitles={jest.fn()}
+        render={clipRender({
+          status: 'FAILED',
+          error: 'Stopped by the user',
+        })}
+        subtitlesAvailable
+      />,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Stopped');
+    expect(screen.queryByText(/Reference ID/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Resume' }));
+
+    expect(onRetry).toHaveBeenCalledWith('render-1');
+  });
+});
+
+describe('BulkRenderControls stop all', () => {
+  it('stops every render in progress', () => {
+    const onStopAll = jest.fn();
+    render(
+      <BulkRenderControls
+        {...bulkToggleProps}
+        busy={false}
+        onRenderAll={jest.fn()}
+        onStopAll={onStopAll}
+        summary={{ total: 3, ready: 1, active: 2, failed: 0, pending: 0 }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop all' }));
+
+    expect(onStopAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the button when nothing is rendering', () => {
+    render(
+      <BulkRenderControls
+        {...bulkToggleProps}
+        busy={false}
+        onRenderAll={jest.fn()}
+        onStopAll={jest.fn()}
+        summary={{ total: 3, ready: 3, active: 0, failed: 0, pending: 0 }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('button', { name: 'Stop all' }),
+    ).not.toBeInTheDocument();
   });
 });

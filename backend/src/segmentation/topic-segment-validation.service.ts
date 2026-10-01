@@ -6,6 +6,7 @@ import type {
   ReconciledTopicSegment,
   TopicSegmentCandidate,
 } from './boundary-reconciliation.service';
+import type { HighlightCandidate } from './clip-planner.service';
 
 const topicSegmentSchema = z
   .object({
@@ -18,6 +19,20 @@ const topicSegmentSchema = z
 
 const topicSegmentsResponseSchema = z
   .object({ segments: z.array(topicSegmentSchema) })
+  .strict();
+
+const highlightSchema = z
+  .object({
+    title: z.string().trim().min(1).max(120),
+    startSec: z.number().finite().min(0),
+    endSec: z.number().finite().positive(),
+    summary: z.string().trim().min(1).max(500),
+    score: z.number().finite().min(0).max(10),
+  })
+  .strict();
+
+const highlightsResponseSchema = z
+  .object({ moments: z.array(highlightSchema) })
   .strict();
 
 const TIME_TOLERANCE_SEC = 0.01;
@@ -110,6 +125,37 @@ export class TopicSegmentValidationService {
     for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
       try {
         return this.parseCandidates(await request(attempt));
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw new SegmentationValidationError(
+      `AI response remained invalid after ${this.maxAttempts} attempts: ${
+        lastError instanceof Error ? lastError.message : 'unknown error'
+      }`,
+    );
+  }
+
+  parseHighlights(response: unknown): HighlightCandidate[] {
+    const parsed = highlightsResponseSchema.safeParse(response);
+    if (!parsed.success) {
+      throw new SegmentationValidationError(
+        'AI response does not match the highlight schema',
+      );
+    }
+
+    return parsed.data.moments.map((moment) => ({ ...moment }));
+  }
+
+  async requestValidHighlights(
+    request: (attempt: number) => Promise<unknown>,
+  ): Promise<HighlightCandidate[]> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      try {
+        return this.parseHighlights(await request(attempt));
       } catch (error) {
         lastError = error;
       }

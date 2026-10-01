@@ -55,3 +55,62 @@ The subtitle position (Top / Middle / Bottom) is chosen in the Subtitle style pa
 ## Note: subtitle files are not used
 
 An overlay built from an uploaded SRT file (`l_subtitles`) was tested after this spike. It broke Arabic words into disconnected letters and offers no control over alignment or box width, so subtitles stay as text layers. Long clips are handled with a named transformation (see Task 8.4 in `PROJECT.md`).
+
+## Fix — words cut off in burned-in subtitles
+
+The reel is burned with an uploaded SRT through Cloudinary's subtitles layer.
+That layer sizes its box from its own measurement of the line, which for Arabic
+(joined letters, hamza, tanween) can be narrower than the glyphs drawn, so the
+first or last letters of a word (most often one-word cues) were clipped.
+`buildSubtitleSrt` now pads every cue with non-breaking spaces
+(`SUBTITLE_FILE_PADDING_CHARS`, default 2) so clipping lands on blank space. The
+SRT content changed, so old reels are never reused: they are deleted when the
+subtitle style or text changes, and the **Re-generate subtitle** button
+(`POST /clips/:id/renders` with `regenerate: true`) deletes and re-renders them.
+`DELETE /videos/:id/renders/subtitled` and `DELETE /clips/:id/renders/subtitled`
+remove subtitled renders (finished or failed ones only).
+
+## Fix 2 — words still cut off (SRT layer replaced by text layers)
+
+Padding the SRT did not help: Cloudinary's subtitles (SRT) layer drops letters
+of Arabic words before it draws the box (`تتفاوض` showed as `تتفا`). Burn-in now
+defaults to `SUBTITLE_BURN_MODE=LAYERS`: every cue is its own Cloudinary text
+layer (the approach verified in the original spike, with the rounded box back),
+grouped into small named transformations (`reelsubs_<hash>`, about 1500
+characters each) created through the Admin API, so the delivery URL only lists
+short names. `SUBTITLE_BURN_MODE=SRT` keeps the old behaviour. The limit on how
+many named transformations a single render can chain has not been measured:
+test one long word-by-word clip.
+
+## Fix 3 — burned-in box had no side padding and lost its opacity
+
+In `LAYERS` mode a Cloudinary text layer draws its background exactly around the
+glyphs, and the alpha channel in `b_rgb:RRGGBBAA` was ignored once the layer also
+had a width and a radius. The preview (CSS padding, `rgba` background) therefore
+looked different from the reel: no room left and right of the word, and a solid
+box instead of the chosen opacity.
+
+`SUBTITLE_BOX_MODE=LAYERED` draws every cue as two stacked layers (the default,
+`ALPHA`, keeps one layer per cue with the alpha in the box colour: shorter URL, but
+Cloudinary may ignore the alpha). If a LAYERED reel does not play, set
+`SUBTITLE_BOX_MODE=ALPHA`: the doubled layer count can exceed what Cloudinary
+accepts in one URL. In LAYERED mode:
+
+1. the **box**: the cue text in the box colour on a solid box of that colour,
+   rounded, applied with `o_<opacity>` on the `fl_layer_apply` component;
+2. the **text** on top, fully opaque, without a background.
+
+Both layers carry the same text padded with non-breaking spaces
+(`SUBTITLE_BOX_PADDING_CHARS`, default 2) so the box has side padding like the
+preview. `SUBTITLE_RENDER_VERSION` in `renders.service.ts` is part of the subtitle
+key, so reels made the old way are not reused; render them again.
+
+## Stopping renders
+
+`POST /renders/:id/stop`, `POST /clips/:id/renders/stop` and
+`POST /videos/:id/renders/stop` stop renders that are waiting or running. A
+stopped job is stored as `FAILED` with the error `Stopped by the user`, so no
+schema change is needed. The worker checks it before starting and on every
+Cloudinary poll, then ends quietly. **Resume** is the normal retry
+(`POST /renders/:id/retry`). Cloudinary cannot cancel a transformation it already
+started; the result is simply not used.

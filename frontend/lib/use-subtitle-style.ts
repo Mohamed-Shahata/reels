@@ -73,5 +73,19 @@ export function useSubtitleStyle(enabled: boolean) {
     }
   }, [catalog, selection, update]);
 
-  return { catalog, selection, error, choosePreset, patchStyle, resetToPreset };
+  /** Puts back an earlier selection, e.g. to undo edits in the dialog. */
+  const restore = useCallback(
+    (previous: SubtitleSelection) => update(previous),
+    [update],
+  );
+
+  return {
+    catalog,
+    selection,
+    error,
+    choosePreset,
+    patchStyle,
+    resetToPreset,
+    restore,
+  };
 }

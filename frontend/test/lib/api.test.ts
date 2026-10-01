@@ -442,6 +442,7 @@ describe('api', () => {
       backgroundColor: '#000000',
       backgroundOpacity: 0.63,
       position: 'BOTTOM',
+      displayMode: 'PHRASE',
     } as const;
     const render = {
       id: 'render-2',
@@ -566,6 +567,7 @@ describe('api', () => {
       defaultPresetId: 'REEL',
       fonts: ['Cairo', 'Amiri', 'Arial'],
       positions: ['TOP', 'MIDDLE', 'BOTTOM'],
+      displayModes: ['PHRASE', 'WORD'],
       fontSize: { min: 20, max: 72 },
       presets: [
         {
@@ -580,6 +582,7 @@ describe('api', () => {
             backgroundColor: '#000000',
             backgroundOpacity: 0.63,
             position: 'BOTTOM',
+            displayMode: 'PHRASE',
           },
         },
       ],
@@ -630,10 +633,80 @@ describe('api', () => {
     });
   });
 
+  it('asks for word by word cues when a mode is given', async () => {
+    fetchMock.mockResolvedValue(
+      response({
+        clipId: 'clip-1',
+        language: 'ar',
+        displayMode: 'WORD',
+        startSec: 10,
+        endSec: 30,
+        durationSec: 20,
+        timing: 'WORD',
+        cues: [],
+      }),
+    );
+
+    const result = await api.getClipSubtitles('clip-1', 'WORD');
+
+    expect(result.displayMode).toBe('WORD');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/clips\/clip-1\/subtitles\?mode=WORD$/),
+      expect.anything(),
+    );
+  });
+
+  it('sends the chosen AI clip mode', async () => {
+    fetchMock.mockResolvedValue(response([]));
+
+    await api.createAiClips('video-1', {
+      confirmReplace: true,
+      mode: 'HIGHLIGHTS',
+    });
+
+    const init = fetchMock.mock.calls[0][1] as { body: string };
+    expect(JSON.parse(init.body)).toEqual({
+      confirmReplace: true,
+      mode: 'HIGHLIGHTS',
+    });
+  });
+
+  it('fills in the phrase layout for styles stored before word mode existed', async () => {
+    const legacy = {
+      defaultPresetId: 'REEL',
+      fonts: ['Cairo'],
+      positions: ['TOP'],
+      fontSize: { min: 20, max: 72 },
+      presets: [
+        {
+          id: 'REEL',
+          label: 'Reel',
+          description: 'x',
+          style: {
+            fontFamily: 'Cairo',
+            fontSizePx: 34,
+            bold: true,
+            textColor: '#ffffff',
+            backgroundColor: '#000000',
+            backgroundOpacity: 0.6,
+            position: 'TOP',
+          },
+        },
+      ],
+    };
+    fetchMock.mockResolvedValue(response(legacy));
+
+    const catalog = await api.getSubtitleStyleCatalog();
+
+    expect(catalog.presets[0].style.displayMode).toBe('PHRASE');
+    expect(catalog.displayModes).toEqual(['PHRASE', 'WORD']);
+  });
+
   it('loads the subtitle cues of a clip', async () => {
     const subtitles = {
       clipId: 'clip-1',
       language: 'ar',
+      displayMode: 'PHRASE',
       startSec: 10,
       endSec: 30,
       durationSec: 20,
@@ -675,6 +748,7 @@ describe('api', () => {
       backgroundColor: '#000000',
       backgroundOpacity: 0.63,
       position: 'BOTTOM',
+      displayMode: 'PHRASE',
     } as const;
     const edits = [{ index: 2, text: 'Fixed line' }];
     const render = {

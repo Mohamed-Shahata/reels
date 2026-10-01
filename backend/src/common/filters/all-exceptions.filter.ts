@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { STATUS_CODES } from 'node:http';
+import { describeError } from '../errors/describe-error';
 
 export interface ErrorResponseBody {
   statusCode: number;
@@ -45,8 +46,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
           path: request.originalUrl,
           statusCode,
           requestId: typeof requestId === 'string' ? requestId : undefined,
-          error:
-            exception instanceof Error ? exception.message : 'unknown error',
+          error: describeError(exception),
         }),
         exception instanceof Error ? exception.stack : undefined,
       );

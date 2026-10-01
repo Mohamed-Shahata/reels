@@ -305,6 +305,8 @@ describe('POST /api/v1/videos (e2e)', () => {
   });
 
   it('returns the authenticated user monthly usage after uploads and clips', async () => {
+    // Usage is recorded in the current month, so never hardcode it.
+    const usageMonth = new Date().toISOString().slice(0, 7);
     const cookies = await registerAndLogin('user@example.com');
     await request(app.getHttpServer())
       .post('/api/v1/videos')
@@ -332,11 +334,11 @@ describe('POST /api/v1/videos (e2e)', () => {
       .expect(201);
 
     const response = await request(app.getHttpServer())
-      .get('/api/v1/usage?month=2026-09')
+      .get(`/api/v1/usage?month=${usageMonth}`)
       .set('Cookie', cookies)
       .expect(200);
     expect(response.body).toEqual({
-      month: '2026-09',
+      month: usageMonth,
       uploadedMinutes: 2,
       clipCount: 2,
       aiRuns: 0,
@@ -345,11 +347,11 @@ describe('POST /api/v1/videos (e2e)', () => {
 
     const otherUser = await registerAndLogin('other@example.com');
     await request(app.getHttpServer())
-      .get('/api/v1/usage?month=2026-09')
+      .get(`/api/v1/usage?month=${usageMonth}`)
       .set('Cookie', otherUser)
       .expect(200)
       .expect({
-        month: '2026-09',
+        month: usageMonth,
         uploadedMinutes: 0,
         clipCount: 0,
         aiRuns: 0,
@@ -498,7 +500,11 @@ describe('POST /api/v1/videos (e2e)', () => {
       expect.objectContaining({ title: 'Opening', source: 'AI' }),
       expect.objectContaining({ title: 'Close', source: 'AI' }),
     ]);
-    expect(segmentation.suggest).toHaveBeenCalledWith('user-1', 'video-1');
+    expect(segmentation.suggest).toHaveBeenCalledWith(
+      'user-1',
+      'video-1',
+      'FULL',
+    );
     const overridden = await request(app.getHttpServer())
       .patch('/api/v1/clips/clip-1')
       .set('Cookie', cookies)

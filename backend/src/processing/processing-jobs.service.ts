@@ -9,9 +9,13 @@ import type {
   ProcessingJobType,
   Prisma,
 } from '../generated/prisma/client';
+import { describeError } from '../common/errors/describe-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { InjectProcessingQueue } from './processing-queue.decorator';
-import type { ProcessingQueueClient } from './processing.constants';
+import {
+  JOB_STOPPED_MESSAGE,
+  type ProcessingQueueClient,
+} from './processing.constants';
 
 export interface CreateProcessingJobInput {
   userId: string;
@@ -87,12 +91,34 @@ export class ProcessingJobsService {
   }
 
   async markFailed(id: string, error: unknown): Promise<ProcessingJob> {
-    const message =
-      error instanceof Error ? error.message : 'Processing job failed';
+    const message = describeError(error, 'Processing job failed');
     return this.updateStatus(id, 'FAILED', {
       failedAt: new Date(),
       lastError: message,
     });
+  }
+
+  /**
+   * Stops a job that is waiting or running. It is stored as FAILED with
+   * JOB_STOPPED_MESSAGE, so the worker sees it on its next check and the user
+   * can resume it with the normal retry.
+   */
+  async stopJob(id: string): Promise<ProcessingJob> {
+    const job = await this.getById(id);
+    if (job.status !== 'PENDING' && job.status !== 'RUNNING') {
+      throw new ConflictException('Only a job in progress can be stopped');
+    }
+
+    const stopped = await this.updateStatus(id, 'FAILED', {
+      failedAt: new Date(),
+      lastError: JOB_STOPPED_MESSAGE,
+    });
+    try {
+      await this.queue.remove?.(id);
+    } catch {
+      // The worker skips a stopped job anyway.
+    }
+    return stopped;
   }
 
   async retryJob(id: string): Promise<ProcessingJob> {

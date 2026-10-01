@@ -36,7 +36,9 @@ describe('validateEnv', () => {
     expect(env.VIDEO_MAX_SIZE_BYTES).toBe(5 * 1024 * 1024 * 1024);
     expect(env.VIDEO_MAX_DURATION_SEC).toBe(4 * 60 * 60);
     expect(env.CLIP_MIN_DURATION_SEC).toBe(5);
-    expect(env.CLIP_MAX_DURATION_SEC).toBe(180);
+    expect(env.CLIP_MAX_DURATION_SEC).toBe(240);
+    expect(env.AI_CLIP_MIN_DURATION_SEC).toBe(60);
+    expect(env.AI_CLIP_MAX_DURATION_SEC).toBe(240);
     expect(env.STALE_UPLOAD_THRESHOLD_SEC).toBe(86400);
     expect(env.STALE_UPLOAD_CLEANUP_INTERVAL_SEC).toBe(3600);
     expect(env.CORS_ORIGIN).toEqual([

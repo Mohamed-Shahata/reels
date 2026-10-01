@@ -16,6 +16,8 @@ export interface SubtitleCue {
   text: string;
 }
 
+export type SubtitleCueMode = 'PHRASE' | 'WORD';
+
 export interface SubtitleCueOptions {
   maxCharsPerCue: number;
   maxWordsPerCue: number;
@@ -34,6 +36,17 @@ export const DEFAULT_SUBTITLE_CUE_OPTIONS: SubtitleCueOptions = {
   maxGapSec: 0.8,
   minCueDurationSec: 0.4,
 };
+
+// One word per cue. A word stays on screen until the next one starts when the
+// speaker does not pause, so the subtitle does not flicker between words.
+export const WORD_SUBTITLE_CUE_OPTIONS: SubtitleCueOptions = {
+  maxCharsPerCue: 60,
+  maxWordsPerCue: 1,
+  maxCueDurationSec: 6,
+  maxGapSec: 0.8,
+  minCueDurationSec: 0.25,
+};
+const WORD_HOLD_MAX_GAP_SEC = 0.35;
 
 // A sentence end only splits a cue once it holds this many characters, so
 // "Yes." does not flash on screen for a fraction of a second.
@@ -69,8 +82,14 @@ export function buildSubtitleCues(
   clipStartSec: number,
   clipEndSec: number,
   options: Partial<SubtitleCueOptions> = {},
+  mode: SubtitleCueMode = 'PHRASE',
 ): SubtitleCue[] {
-  const settings = { ...DEFAULT_SUBTITLE_CUE_OPTIONS, ...options };
+  const settings = {
+    ...(mode === 'WORD'
+      ? WORD_SUBTITLE_CUE_OPTIONS
+      : DEFAULT_SUBTITLE_CUE_OPTIONS),
+    ...options,
+  };
   const clipDurationSec = clipEndSec - clipStartSec;
   if (!Number.isFinite(clipDurationSec) || clipDurationSec <= 0) {
     return [];
@@ -84,7 +103,8 @@ export function buildSubtitleCues(
   );
   const drafts = groupIntoDrafts(clipWords, settings);
   const separated = separateCues(drafts);
-  const held = extendShortCues(separated, settings, clipDurationSec);
+  const joined = mode === 'WORD' ? holdWordCues(separated) : separated;
+  const held = extendShortCues(joined, settings, clipDurationSec);
 
   return held.map((cue, position) => ({
     index: position + 1,
@@ -253,6 +273,15 @@ function separateCues(drafts: readonly DraftCue[]): DraftCue[] {
   }
 
   return result;
+}
+
+function holdWordCues(cues: readonly DraftCue[]): DraftCue[] {
+  return cues.map((cue, position) => {
+    const next = cues[position + 1];
+    return next && next.startSec - cue.endSec <= WORD_HOLD_MAX_GAP_SEC
+      ? { ...cue, endSec: Math.max(cue.endSec, next.startSec) }
+      : cue;
+  });
 }
 
 function extendShortCues(

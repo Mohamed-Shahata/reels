@@ -1,7 +1,10 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { ProcessingJob } from '../../../src/generated/prisma/client';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
-import type { ProcessingQueueClient } from '../../../src/processing/processing.constants';
+import {
+  JOB_STOPPED_MESSAGE,
+  type ProcessingQueueClient,
+} from '../../../src/processing/processing.constants';
 import { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
 
 function buildJob(overrides: Partial<ProcessingJob> = {}): ProcessingJob {
@@ -171,6 +174,56 @@ describe('ProcessingJobsService', () => {
       );
       expect(processingJob.update).not.toHaveBeenCalled();
       expect(ensureQueued).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['PENDING', 'RUNNING'] as const)(
+    'stops a %s job by storing it as failed with the stopped message',
+    async (status) => {
+      const remove = jest.fn().mockResolvedValue(undefined);
+      const stored = buildJob({
+        status: 'FAILED',
+        lastError: JOB_STOPPED_MESSAGE,
+      });
+      const processingJob = {
+        findUnique: jest.fn().mockResolvedValue(buildJob({ status })),
+        update: jest.fn().mockResolvedValue(stored),
+      };
+      const service = new ProcessingJobsService(
+        { processingJob } as unknown as PrismaService,
+        { enqueue: jest.fn(), ensureQueued: jest.fn(), remove },
+      );
+
+      await expect(service.stopJob('job-1')).resolves.toEqual(stored);
+
+      expect(processingJob.update).toHaveBeenCalledWith({
+        where: { id: 'job-1' },
+        data: {
+          status: 'FAILED',
+          failedAt: expect.any(Date) as unknown,
+          lastError: JOB_STOPPED_MESSAGE,
+        },
+      });
+      expect(remove).toHaveBeenCalledWith('job-1');
+    },
+  );
+
+  it.each(['COMPLETED', 'FAILED'] as const)(
+    'refuses to stop a %s job',
+    async (status) => {
+      const processingJob = {
+        findUnique: jest.fn().mockResolvedValue(buildJob({ status })),
+        update: jest.fn(),
+      };
+      const service = new ProcessingJobsService(
+        { processingJob } as unknown as PrismaService,
+        { enqueue: jest.fn(), ensureQueued: jest.fn() },
+      );
+
+      await expect(service.stopJob('job-1')).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+      expect(processingJob.update).not.toHaveBeenCalled();
     },
   );
 });
