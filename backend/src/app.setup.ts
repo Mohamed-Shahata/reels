@@ -12,11 +12,16 @@ export function configureApp(app: INestApplication): void {
   const config = app.get<ConfigService<Env, true>>(ConfigService);
 
   app.setGlobalPrefix(API_PREFIX);
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
   app.use(cookieParser());
   app.enableCors({
     origin: config.get('CORS_ORIGIN', { infer: true }),
     credentials: true,
+    exposedHeaders: ['Content-Range', 'Content-Length', 'Accept-Ranges'],
   });
   app.useGlobalPipes(createValidationPipe());
   app.useGlobalFilters(new AllExceptionsFilter());

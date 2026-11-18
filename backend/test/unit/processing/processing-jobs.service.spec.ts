@@ -1,10 +1,6 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { ProcessingJob } from '../../../src/generated/prisma/client';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
-import {
-  JOB_STOPPED_MESSAGE,
-  type ProcessingQueueClient,
-} from '../../../src/processing/processing.constants';
 import { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
 
 function buildJob(overrides: Partial<ProcessingJob> = {}): ProcessingJob {
@@ -12,11 +8,16 @@ function buildJob(overrides: Partial<ProcessingJob> = {}): ProcessingJob {
     id: 'job-1',
     userId: 'user-1',
     videoId: 'video-1',
-    type: 'TRANSCRIPTION',
-    status: 'PENDING',
-    bullJobId: 'job-1',
+    type: 'TRANSCRIBE',
+    status: 'QUEUED',
+    idempotencyKey: 'video-1:TRANSCRIBE:123',
+    bullJobId: null,
     progress: 0,
-    attempts: 0,
+    attempt: 0,
+    maxAttempts: 5,
+    lockedBy: null,
+    heartbeatAt: null,
+    errorCode: null,
     lastError: null,
     payload: null,
     startedAt: null,
@@ -29,27 +30,31 @@ function buildJob(overrides: Partial<ProcessingJob> = {}): ProcessingJob {
 }
 
 describe('ProcessingJobsService', () => {
-  it('creates a persisted job and enqueues it', async () => {
-    const created = buildJob({ bullJobId: null });
+  it('creates a persisted job and enqueues it to outbox via transaction', async () => {
     const persisted = buildJob();
-    const enqueue = jest.fn().mockResolvedValue(undefined);
-    const ensureQueued = jest.fn();
-    const queue: ProcessingQueueClient = { enqueue, ensureQueued };
     const processingJob = {
-      create: jest.fn().mockResolvedValue(created),
-      update: jest.fn().mockResolvedValue(persisted),
-      findMany: jest.fn(),
+      create: jest.fn().mockResolvedValue(persisted),
+    };
+    const outboxEvent = {
+      create: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+    };
+    const tx = { processingJob, outboxEvent };
+    const prisma = {
+      processingJob,
+      outboxEvent,
+      $transaction: jest.fn(
+        async (cb: (txArg: typeof tx) => Promise<unknown>) => cb(tx),
+      ),
     };
     const service = new ProcessingJobsService(
-      { processingJob } as unknown as PrismaService,
-      queue,
+      prisma as unknown as PrismaService,
     );
 
     await expect(
       service.createJob({
         userId: 'user-1',
         videoId: 'video-1',
-        type: 'TRANSCRIPTION',
+        type: 'TRANSCRIBE',
       }),
     ).resolves.toEqual(persisted);
 
@@ -57,84 +62,71 @@ describe('ProcessingJobsService', () => {
       data: {
         userId: 'user-1',
         videoId: 'video-1',
-        type: 'TRANSCRIPTION',
-        status: 'PENDING',
+        type: 'TRANSCRIBE',
+        status: 'QUEUED',
+        idempotencyKey: expect.stringContaining('video-1:TRANSCRIBE:'),
+        maxAttempts: 5,
         payload: undefined,
-        bullJobId: undefined,
       },
     });
-    expect(enqueue).toHaveBeenCalledWith({
-      processingJobId: 'job-1',
-      type: 'TRANSCRIPTION',
-    });
-    expect(processingJob.update).toHaveBeenCalledWith({
-      where: { id: 'job-1' },
-      data: { bullJobId: 'job-1' },
-    });
-  });
-
-  it('re-queues persisted pending and running jobs on recovery', async () => {
-    const pending = buildJob({ id: 'job-pending', status: 'PENDING' });
-    const running = buildJob({ id: 'job-running', status: 'RUNNING' });
-    const enqueue = jest.fn();
-    const ensureQueued = jest.fn().mockResolvedValue(undefined);
-    const queue: ProcessingQueueClient = { enqueue, ensureQueued };
-    const processingJob = {
-      findMany: jest.fn().mockResolvedValue([pending, running]),
-      update: jest.fn().mockResolvedValue(undefined),
-    };
-    const service = new ProcessingJobsService(
-      { processingJob } as unknown as PrismaService,
-      queue,
-    );
-
-    await expect(service.recoverPersistedJobs()).resolves.toBe(2);
-
-    expect(processingJob.update).toHaveBeenCalledWith({
-      where: { id: 'job-running' },
-      data: { status: 'PENDING', startedAt: null },
-    });
-    expect(ensureQueued).toHaveBeenCalledTimes(2);
-    expect(ensureQueued).toHaveBeenCalledWith({
-      processingJobId: 'job-pending',
-      type: 'TRANSCRIPTION',
-    });
-    expect(ensureQueued).toHaveBeenCalledWith({
-      processingJobId: 'job-running',
-      type: 'TRANSCRIPTION',
+    expect(outboxEvent.create).toHaveBeenCalledWith({
+      data: {
+        routingKey: 'transcribe',
+        payload: {
+          processingJobId: 'job-1',
+          videoId: 'video-1',
+          userId: 'user-1',
+          type: 'TRANSCRIBE',
+          payload: undefined,
+        },
+      },
     });
   });
 
   it('throws when a job is missing', async () => {
-    const service = new ProcessingJobsService(
-      {
-        processingJob: { findUnique: jest.fn().mockResolvedValue(null) },
-      } as unknown as PrismaService,
-      { enqueue: jest.fn(), ensureQueued: jest.fn() },
-    );
+    const service = new ProcessingJobsService({
+      processingJob: { findUnique: jest.fn().mockResolvedValue(null) },
+    } as unknown as PrismaService);
 
     await expect(service.getById('missing')).rejects.toBeInstanceOf(
       NotFoundException,
     );
   });
 
-  it('resets a failed job and re-queues it for another attempt', async () => {
+  it('resets a failed job and writes retry event to outbox', async () => {
     const failed = buildJob({
       type: 'RENDER',
       status: 'FAILED',
-      attempts: 1,
+      attempt: 1,
       lastError: 'Timed out waiting for the reel to render',
       failedAt: new Date('2026-09-28T00:01:00.000Z'),
     });
-    const reset = buildJob({ type: 'RENDER', attempts: 1 });
-    const ensureQueued = jest.fn().mockResolvedValue(undefined);
+    const reset = buildJob({ type: 'RENDER', attempt: 1 });
     const processingJob = {
       findUnique: jest.fn().mockResolvedValue(failed),
       update: jest.fn().mockResolvedValue(reset),
     };
+    const outboxEvent = {
+      create: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+    };
+    const jobEvent = {
+      create: jest.fn().mockResolvedValue({ id: 'event-1' }),
+    };
+    const tx = {
+      processingJob,
+      outboxEvent,
+      jobEvent,
+    };
+    const prisma = {
+      processingJob,
+      outboxEvent,
+      jobEvent,
+      $transaction: jest.fn(
+        async (cb: (txArg: typeof tx) => Promise<unknown>) => cb(tx),
+      ),
+    };
     const service = new ProcessingJobsService(
-      { processingJob } as unknown as PrismaService,
-      { enqueue: jest.fn(), ensureQueued },
+      prisma as unknown as PrismaService,
     );
 
     await expect(service.retryJob('job-1')).resolves.toEqual(reset);
@@ -142,88 +134,169 @@ describe('ProcessingJobsService', () => {
     expect(processingJob.update).toHaveBeenCalledWith({
       where: { id: 'job-1' },
       data: {
-        status: 'PENDING',
+        status: 'QUEUED',
         progress: 0,
+        errorCode: null,
         lastError: null,
         startedAt: null,
         completedAt: null,
         failedAt: null,
+        lockedBy: null,
+        heartbeatAt: null,
       },
     });
-    expect(ensureQueued).toHaveBeenCalledWith({
-      processingJobId: 'job-1',
-      type: 'RENDER',
+    expect(outboxEvent.create).toHaveBeenCalledWith({
+      data: {
+        routingKey: 'render',
+        payload: {
+          processingJobId: 'job-1',
+          videoId: 'video-1',
+          userId: 'user-1',
+          type: 'RENDER',
+          payload: null,
+        },
+      },
+    });
+    expect(jobEvent.create).toHaveBeenCalledWith({
+      data: {
+        jobId: 'job-1',
+        level: 'INFO',
+        message: 'Job retried by user for stage RENDER',
+      },
     });
   });
 
-  it.each(['PENDING', 'RUNNING', 'COMPLETED'] as const)(
+  it.each(['QUEUED', 'RUNNING', 'COMPLETED'] as const)(
     'refuses to retry a %s job',
     async (status) => {
-      const ensureQueued = jest.fn();
       const processingJob = {
         findUnique: jest.fn().mockResolvedValue(buildJob({ status })),
         update: jest.fn(),
       };
-      const service = new ProcessingJobsService(
-        { processingJob } as unknown as PrismaService,
-        { enqueue: jest.fn(), ensureQueued },
-      );
+      const service = new ProcessingJobsService({
+        processingJob,
+      } as unknown as PrismaService);
 
       await expect(service.retryJob('job-1')).rejects.toBeInstanceOf(
         ConflictException,
       );
       expect(processingJob.update).not.toHaveBeenCalled();
-      expect(ensureQueued).not.toHaveBeenCalled();
     },
   );
 
-  it.each(['PENDING', 'RUNNING'] as const)(
-    'stops a %s job by storing it as failed with the stopped message',
+  it.each(['QUEUED', 'RUNNING', 'RETRYING'] as const)(
+    'cancels a %s job by storing it as cancelled',
     async (status) => {
-      const remove = jest.fn().mockResolvedValue(undefined);
       const stored = buildJob({
-        status: 'FAILED',
-        lastError: JOB_STOPPED_MESSAGE,
+        status: 'CANCELLED',
+        lastError: 'Cancelled by the user',
+        errorCode: 'CANCELLED_BY_USER',
       });
       const processingJob = {
         findUnique: jest.fn().mockResolvedValue(buildJob({ status })),
         update: jest.fn().mockResolvedValue(stored),
       };
-      const service = new ProcessingJobsService(
-        { processingJob } as unknown as PrismaService,
-        { enqueue: jest.fn(), ensureQueued: jest.fn(), remove },
-      );
+      const jobEvent = {
+        create: jest.fn().mockResolvedValue({ id: 'event-1' }),
+      };
+      const service = new ProcessingJobsService({
+        processingJob,
+        jobEvent,
+      } as unknown as PrismaService);
 
-      await expect(service.stopJob('job-1')).resolves.toEqual(stored);
+      await expect(service.cancelJob('job-1')).resolves.toEqual(stored);
 
       expect(processingJob.update).toHaveBeenCalledWith({
         where: { id: 'job-1' },
         data: {
-          status: 'FAILED',
+          status: 'CANCELLED',
           failedAt: expect.any(Date) as unknown,
-          lastError: JOB_STOPPED_MESSAGE,
+          lastError: 'Cancelled by the user',
+          errorCode: 'CANCELLED_BY_USER',
         },
       });
-      expect(remove).toHaveBeenCalledWith('job-1');
+      expect(jobEvent.create).toHaveBeenCalledWith({
+        data: {
+          jobId: 'job-1',
+          level: 'WARN',
+          message: 'Job was cancelled by the user',
+        },
+      });
     },
   );
 
   it.each(['COMPLETED', 'FAILED'] as const)(
-    'refuses to stop a %s job',
+    'refuses to cancel a %s job',
     async (status) => {
       const processingJob = {
         findUnique: jest.fn().mockResolvedValue(buildJob({ status })),
         update: jest.fn(),
       };
-      const service = new ProcessingJobsService(
-        { processingJob } as unknown as PrismaService,
-        { enqueue: jest.fn(), ensureQueued: jest.fn() },
-      );
+      const service = new ProcessingJobsService({
+        processingJob,
+      } as unknown as PrismaService);
 
-      await expect(service.stopJob('job-1')).rejects.toBeInstanceOf(
+      await expect(service.cancelJob('job-1')).rejects.toBeInstanceOf(
         ConflictException,
       );
       expect(processingJob.update).not.toHaveBeenCalled();
     },
   );
+
+  describe('enqueue (Transactional Outbox)', () => {
+    it('creates ProcessingJob and OutboxEvent in the same transaction', async () => {
+      const mockJob = buildJob({
+        id: 'job-outbox-1',
+        idempotencyKey: 'video-1:TRANSCRIBE:custom',
+        type: 'TRANSCRIBE',
+        maxAttempts: 5,
+      });
+      const tx = {
+        processingJob: {
+          create: jest.fn().mockResolvedValue(mockJob),
+        },
+        outboxEvent: {
+          create: jest.fn().mockResolvedValue({ id: 'outbox-1' }),
+        },
+      };
+
+      const service = new ProcessingJobsService({} as unknown as PrismaService);
+
+      const result = await service.enqueue(
+        tx as unknown as Parameters<typeof service.enqueue>[0],
+        {
+          userId: 'user-1',
+          videoId: 'video-1',
+          type: 'TRANSCRIBE',
+          idempotencyKey: 'video-1:TRANSCRIBE:custom',
+          payload: { test: true },
+        },
+      );
+
+      expect(result).toEqual(mockJob);
+      expect(tx.processingJob.create).toHaveBeenCalledWith({
+        data: {
+          userId: 'user-1',
+          videoId: 'video-1',
+          type: 'TRANSCRIBE',
+          status: 'QUEUED',
+          idempotencyKey: 'video-1:TRANSCRIBE:custom',
+          maxAttempts: 5,
+          payload: { test: true },
+        },
+      });
+      expect(tx.outboxEvent.create).toHaveBeenCalledWith({
+        data: {
+          routingKey: 'transcribe',
+          payload: {
+            processingJobId: 'job-outbox-1',
+            videoId: 'video-1',
+            userId: 'user-1',
+            type: 'TRANSCRIBE',
+            payload: { test: true },
+          },
+        },
+      });
+    });
+  });
 });

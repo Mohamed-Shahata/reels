@@ -3,7 +3,6 @@ import { Prisma } from '../../../src/generated/prisma/client';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
 import type { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
 import { RendersService } from '../../../src/renders/renders.service';
-import type { StorageService } from '../../../src/storage/storage.service';
 import { getSubtitlePreset } from '../../../src/subtitles/subtitle-style';
 import type { SubtitlesService } from '../../../src/subtitles/subtitles.service';
 
@@ -20,7 +19,6 @@ const clipWithTranscript = {
   video: {
     id: 'video-1',
     status: 'READY',
-    cloudinaryId: 'cloud/video-1',
     transcript: { id: 'transcript-1' },
   },
 };
@@ -64,7 +62,6 @@ function setup() {
       createJob: jest.fn().mockResolvedValue({ id: 'job-1' }),
     } as unknown as ProcessingJobsService,
     { buildCues } as unknown as SubtitlesService,
-    {} as unknown as StorageService,
   );
   return { service, clipRender, buildCues };
 }
@@ -224,7 +221,6 @@ describe('RendersService subtitle edits', () => {
         { clipRender } as unknown as PrismaService,
         { retryJob } as unknown as ProcessingJobsService,
         { buildCues } as unknown as SubtitlesService,
-        {} as unknown as StorageService,
       );
       return { service, clipRender };
     }

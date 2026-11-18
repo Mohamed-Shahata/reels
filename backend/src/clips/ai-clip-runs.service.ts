@@ -28,13 +28,25 @@ export class AiClipRunsService {
     await this.segmentation.assertReady(userId, videoId);
     await this.usage.reserveAiRun(userId);
 
-    const segments = await this.segmentation.suggest(
-      userId,
-      videoId,
-      dto.mode ?? DEFAULT_AI_CLIP_MODE,
-    );
-    return this.clips.createAiSuggestions(userId, videoId, segments, {
-      replaceExisting: existingAiClips > 0,
-    });
+    try {
+      const segments = await this.segmentation.suggest(
+        userId,
+        videoId,
+        dto.mode ?? DEFAULT_AI_CLIP_MODE,
+      );
+      const clips = await this.clips.createAiSuggestions(
+        userId,
+        videoId,
+        segments,
+        {
+          replaceExisting: existingAiClips > 0,
+        },
+      );
+      this.usage.commitAiRun(userId);
+      return clips;
+    } catch (err) {
+      await this.usage.releaseAiRun(userId);
+      throw err;
+    }
   }
 }

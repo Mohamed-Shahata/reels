@@ -1,6 +1,7 @@
 'use client';
 
 import type { Clip, ClipRender } from '@/lib/api';
+import { formatClipLength } from '@/lib/clip-insights';
 import {
   getClipRenderState,
   readyPercent,
@@ -33,7 +34,7 @@ interface ClipRenderControlsProps {
 }
 
 const btnCls =
-  'h-8 rounded-lg border border-[#d5e2dc] bg-white px-3 text-xs font-semibold text-[#3f4f4a] hover:border-[#0f766e] hover:bg-[#e4f3ef] hover:text-[#0f766e] disabled:cursor-not-allowed disabled:opacity-50';
+  'h-8 rounded-lg border border-zinc-800 bg-zinc-800/90 px-3 text-xs font-semibold text-zinc-200 hover:border-emerald-500/50 hover:bg-emerald-500/10 hover:text-emerald-400 disabled:cursor-not-allowed disabled:opacity-50 transition-colors';
 
 function describeState(s: ClipRenderState) {
   if (s.kind === 'ready') return 'Ready';
@@ -45,11 +46,15 @@ function describeState(s: ClipRenderState) {
 }
 
 function badgeCls(s: ClipRenderState) {
-  if (s.kind === 'ready') return 'bg-[#dce6e1] text-[#0b615b]';
-  if (s.kind === 'failed') return 'bg-[#fff2ef] text-[#c44932]';
-  if (s.kind === 'stopped') return 'bg-[#fff7e0] text-[#8a5a00]';
-  if (s.kind === 'active') return 'bg-[#e4f3ef] text-[#0f766e]';
-  return 'bg-gray-100 text-gray-600';
+  if (s.kind === 'ready')
+    return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+  if (s.kind === 'failed')
+    return 'bg-rose-500/15 text-rose-400 border border-rose-500/30';
+  if (s.kind === 'stopped')
+    return 'bg-amber-500/15 text-amber-400 border border-amber-500/30';
+  if (s.kind === 'active')
+    return 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 animate-pulse';
+  return 'bg-zinc-800 text-zinc-400 border border-zinc-700/50';
 }
 
 function RenderIcon() {
@@ -132,13 +137,116 @@ function PlayIcon() {
   return (
     <svg
       aria-hidden="true"
-      fill="white"
-      height="20"
+      fill="currentColor"
+      height="18"
       viewBox="0 0 24 24"
-      width="20"
+      width="18"
     >
       <polygon points="5 3 19 12 5 21 5 3" />
     </svg>
+  );
+}
+
+export interface ClipThumbnailProps {
+  clip: Clip;
+  render?: ClipRender;
+  aspect: ReelAspect;
+  isPortrait: boolean;
+  onPreview: (aspect: ReelAspect) => void;
+  busy: boolean;
+  thumbnailUrl?: string | null;
+}
+
+export function ClipThumbnail({
+  clip,
+  render,
+  aspect,
+  isPortrait,
+  onPreview,
+  busy,
+  thumbnailUrl = null,
+}: ClipThumbnailProps) {
+  const [imgError, setImgError] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const state = getClipRenderState(clip, render);
+
+  const resolvedUrl = !imgError ? (clip.thumbnailUrl || thumbnailUrl) : null;
+
+  return (
+    <button
+      aria-label={`Preview ${aspect} reel for ${clip.title}`}
+      className="group relative flex w-full items-center justify-center overflow-hidden rounded-xl bg-zinc-950 border border-zinc-800/80 transition-all duration-200 hover:border-emerald-500/40 hover:shadow-lg hover:shadow-emerald-500/5 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+      disabled={busy}
+      onClick={() => onPreview(aspect)}
+      style={
+        isPortrait
+          ? { aspectRatio: '9/16', width: '100%' }
+          : { aspectRatio: '16/9', width: '100%' }
+      }
+      type="button"
+    >
+      {render?.status === 'COMPLETED' && render.outputUrl ? (
+        <video
+          className="h-full w-full object-cover"
+          muted
+          playsInline
+          preload="metadata"
+          src={`${render.outputUrl}#t=0.5`}
+        />
+      ) : resolvedUrl ? (
+        <>
+          {!imgLoaded && (
+            <div className="absolute inset-0 animate-pulse bg-zinc-800/60" />
+          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            alt=""
+            className={`h-full w-full object-cover transition-opacity duration-300 ${
+              imgLoaded ? 'opacity-100' : 'opacity-0'
+            }`}
+            decoding="async"
+            loading="lazy"
+            onError={() => setImgError(true)}
+            onLoad={() => setImgLoaded(true)}
+            src={resolvedUrl}
+          />
+        </>
+      ) : (
+        <div className="relative flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 p-3 text-center">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-800/80 border border-zinc-700/50 text-zinc-400 group-hover:text-emerald-400 transition-colors">
+            <svg
+              aria-hidden="true"
+              className="h-5 w-5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              viewBox="0 0 24 24"
+            >
+              <rect height="18" rx="2" width="20" x="2" y="3" />
+              <path d="M7 3v18M17 3v18M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5" />
+            </svg>
+          </div>
+          <span className="mt-2 text-[10px] font-semibold text-zinc-300">
+            {state.kind === 'idle' ? 'Not rendered yet' : describeState(state)}
+          </span>
+          <span className="mt-1 font-mono text-[9px] text-zinc-500">
+            {formatClipLength(clip.startSec, clip.endSec)}
+          </span>
+        </div>
+      )}
+
+      {/* Modern Frosted Glass Play Overlay */}
+      <span className="absolute inset-0 flex items-center justify-center bg-black/40 backdrop-blur-[2px] opacity-0 transition-all duration-200 group-hover:opacity-100">
+        <span className="flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-md bg-black/40 text-emerald-400 ring-1 ring-white/10 shadow-lg shadow-black/50 transition-transform duration-200 group-hover:scale-110">
+          <PlayIcon />
+        </span>
+      </span>
+
+      {/* Duration Pill in Corner */}
+      <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/75 backdrop-blur-md px-1.5 py-0.5 font-mono text-[9px] font-medium text-zinc-300">
+        {formatClipLength(clip.startSec, clip.endSec)}
+      </span>
+    </button>
   );
 }
 
@@ -171,11 +279,11 @@ export function useClipReelNodes({
   const isPortrait = aspect === '9:16';
 
   const aspectSwitch = (
-    <div className="flex rounded-md border border-[#d8e1dc] bg-[#f6f8f7] p-0.5 text-[10px] font-semibold">
+    <div className="flex rounded-md border border-zinc-800 bg-zinc-900/90 p-0.5 text-[10px] font-semibold">
       {(['9:16', '16:9'] as const).map((a) => (
         <button
           aria-pressed={aspect === a}
-          className={`rounded px-1.5 py-0.5 transition-colors ${aspect === a ? 'bg-white text-[#0f766e] shadow-sm' : 'text-[#5d6d68] hover:text-[#0f766e]'}`}
+          className={`rounded px-1.5 py-0.5 transition-colors ${aspect === a ? 'bg-zinc-800 text-emerald-400 shadow-sm border border-zinc-700/60' : 'text-zinc-400 hover:text-emerald-400'}`}
           key={a}
           onClick={() => onAspectChange(a)}
           type="button"
@@ -193,7 +301,7 @@ export function useClipReelNodes({
       role="group"
     >
       <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold">{aspect} reel</span>
+        <span className="text-xs font-semibold text-zinc-200">{aspect} reel</span>
         {aspectSwitch}
       </div>
       <span
@@ -206,48 +314,15 @@ export function useClipReelNodes({
   );
 
   const thumbnail = (
-    <button
-      aria-label={`Preview ${aspect} reel for ${clip.title}`}
-      className="group relative flex w-full items-center justify-center overflow-hidden rounded-lg bg-[#1f2b28] transition-transform active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
-      disabled={busy}
-      onClick={() => onPreview(aspect)}
-      style={
-        isPortrait
-          ? { aspectRatio: '9/16', width: '100%' }
-          : { aspectRatio: '16/9', width: '100%' }
-      }
-      type="button"
-    >
-      {thumbnailUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          alt=""
-          className="h-full w-full object-cover"
-          decoding="async"
-          loading="lazy"
-          src={thumbnailUrl}
-        />
-      ) : render?.status === 'COMPLETED' && render.outputUrl ? (
-        <video
-          className="h-full w-full object-contain"
-          muted
-          playsInline
-          preload="metadata"
-          src={`${render.outputUrl}#t=0.5`}
-        />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center">
-          <span className="text-[10px] font-medium text-[#8ba7a0]">
-            {state.kind === 'idle' ? 'Not rendered yet' : describeState(state)}
-          </span>
-        </div>
-      )}
-      <span className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
-        <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[#0f766e]/90">
-          <PlayIcon />
-        </span>
-      </span>
-    </button>
+    <ClipThumbnail
+      aspect={aspect}
+      busy={busy}
+      clip={clip}
+      isPortrait={isPortrait}
+      onPreview={onPreview}
+      render={render}
+      thumbnailUrl={thumbnailUrl}
+    />
   );
 
   const controls = (
@@ -262,39 +337,39 @@ export function useClipReelNodes({
             aria-valuemax={100}
             aria-valuemin={0}
             aria-valuenow={state.queued ? 0 : state.progress}
-            className="h-1.5 overflow-hidden rounded-full bg-[#dce6e1]"
+            className="h-1.5 overflow-hidden rounded-full bg-zinc-800"
             role="progressbar"
           >
             <div
-              className="h-full rounded-full bg-[#0f766e] transition-[width] duration-[2800ms] ease-linear"
+              className="h-full rounded-full bg-emerald-500 transition-[width] duration-[2800ms] ease-linear"
               style={{ width: `${state.queued ? 4 : state.progress}%` }}
             />
           </div>
-          <p className="mt-1 text-[11px] text-[#5d6d68]">
+          <p className="mt-1 text-[11px] text-zinc-400">
             {state.queued ? 'Waiting in queue...' : 'Processing video...'}
           </p>
         </div>
       ) : null}
 
       {state.kind === 'stopped' ? (
-        <p className="mt-2 text-[11px] text-[#8a5a00]">
+        <p className="mt-2 text-[11px] text-amber-400">
           Rendering was stopped. Resume it whenever you are ready.
         </p>
       ) : null}
 
       {state.kind === 'failed' ? (
-        <div className="mt-2 rounded-md border border-[#f0c9c0] bg-[#fff2ef] px-2 py-1.5 text-xs text-[#8f2f1f]">
+        <div className="mt-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-2.5 py-2 text-xs text-rose-300">
           {state.message ? <p>{state.message}</p> : null}
-          <p className="mt-0.5 font-mono text-[10px] text-[#a5533f]">
+          <p className="mt-0.5 font-mono text-[10px] text-rose-400">
             Reference ID: {renderReference(state.renderId)}
           </p>
         </div>
       ) : null}
 
-      <label className="mt-2 flex w-fit cursor-pointer items-center gap-2 text-xs">
+      <label className="mt-2 flex w-fit cursor-pointer items-center gap-2 text-xs text-zinc-300">
         <input
           checked={burnSubtitles}
-          className="h-4 w-4 cursor-pointer accent-[#0f766e] disabled:cursor-not-allowed"
+          className="h-4 w-4 cursor-pointer accent-emerald-500 disabled:cursor-not-allowed"
           disabled={!subtitlesAvailable}
           onChange={(e) => onToggleSubtitles(e.target.checked)}
           type="checkbox"
@@ -302,7 +377,7 @@ export function useClipReelNodes({
         Burn in subtitles
       </label>
       {!subtitlesAvailable && (
-        <p className="mt-1 text-xs text-[#5d6d68]">
+        <p className="mt-1 text-xs text-zinc-500">
           Transcribe the video to burn in subtitles.
         </p>
       )}
@@ -332,7 +407,7 @@ export function useClipReelNodes({
         {state.kind === 'active' && onStop && render ? (
           <button
             aria-label={`Stop rendering ${clip.title}`}
-            className="flex h-8 items-center gap-1.5 rounded-lg border border-[#e3b8ae] bg-white px-3 text-xs font-semibold text-[#c44932] hover:bg-[#fff2ef] disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-8 items-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 text-xs font-semibold text-rose-400 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
             disabled={busy}
             onClick={() => onStop(render.id)}
             title="Stop this render. You can resume it later."
@@ -418,7 +493,7 @@ export function ClipRenderControls(
   });
 
   return (
-    <div className="mt-3 border-t border-[#eef2f0] pt-3">
+    <div className="mt-3 border-t border-zinc-800/80 pt-3">
       {thumbnail}
       <div className="mt-2">{controls}</div>
     </div>
@@ -467,9 +542,9 @@ export function BulkRenderControls({
   ].filter((p): p is string => p !== null);
 
   return (
-    <div className="mt-3 rounded-xl border border-[#d8e1dc] bg-white p-3">
+    <div className="mt-3 rounded-2xl border border-zinc-800 bg-zinc-900/90 p-4 shadow-xl backdrop-blur-sm">
       <button
-        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[#0f766e] px-4 text-xs font-semibold text-white shadow-sm hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0] disabled:shadow-none"
+        className="inline-flex h-8 items-center gap-1.5 rounded-full bg-emerald-500 px-4 text-xs font-bold text-zinc-950 shadow-md shadow-emerald-500/20 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none transition-colors"
         disabled={busy || nothingToRender}
         onClick={onRenderAll}
         type="button"
@@ -479,7 +554,7 @@ export function BulkRenderControls({
       </button>
       {onRegenerateAll && burnSubtitles && subtitlesAvailable && (
         <button
-          className="ml-2 inline-flex h-8 items-center gap-1.5 rounded-full border border-[#0f766e] bg-white px-4 text-xs font-semibold text-[#0f766e] hover:bg-[#e4f3ef] disabled:cursor-not-allowed disabled:opacity-50"
+          className="ml-2 inline-flex h-8 items-center gap-1.5 rounded-full border border-emerald-500/40 bg-zinc-800 px-4 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
           disabled={busy}
           onClick={onRegenerateAll}
           type="button"
@@ -490,7 +565,7 @@ export function BulkRenderControls({
       )}
       {onStopAll && (summary.active > 0 || stopping) && (
         <button
-          className="ml-2 inline-flex h-8 items-center gap-1.5 rounded-full border border-[#c44932] bg-white px-4 text-xs font-semibold text-[#c44932] hover:bg-[#fff2ef] disabled:cursor-not-allowed disabled:opacity-50"
+          className="ml-2 inline-flex h-8 items-center gap-1.5 rounded-full border border-rose-500/40 bg-rose-500/10 px-4 text-xs font-semibold text-rose-400 hover:bg-rose-500/20 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
           disabled={stopping}
           onClick={onStopAll}
           title="Stop every render that is waiting or running"
@@ -500,10 +575,10 @@ export function BulkRenderControls({
           {stopping ? 'Stopping' : 'Stop all'}
         </button>
       )}
-      <label className="mt-2 flex w-fit cursor-pointer items-center gap-2 text-xs">
+      <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 text-xs text-zinc-300">
         <input
           checked={burnSubtitles}
-          className="h-4 w-4 cursor-pointer accent-[#0f766e] disabled:cursor-not-allowed"
+          className="h-4 w-4 cursor-pointer accent-emerald-500 disabled:cursor-not-allowed"
           disabled={!subtitlesAvailable}
           onChange={(e) => onToggleSubtitles(e.target.checked)}
           type="checkbox"
@@ -511,12 +586,12 @@ export function BulkRenderControls({
         Burn in subtitles for all clips
       </label>
       {hasClipOverrides && (
-        <p className="mt-1 text-xs text-[#5d6d68]">
+        <p className="mt-1 text-xs text-zinc-400">
           Some clips use their own subtitle setting.
         </p>
       )}
       {hasEditedClips && (
-        <p className="mt-1 text-xs text-[#5d6d68]">
+        <p className="mt-1 text-xs text-zinc-400">
           Some clips use edited subtitle text.
         </p>
       )}
@@ -525,25 +600,25 @@ export function BulkRenderControls({
         aria-valuemax={100}
         aria-valuemin={0}
         aria-valuenow={readyPercent(summary)}
-        className="mt-3 flex h-2 overflow-hidden rounded-full bg-[#dce6e1]"
+        className="mt-3 flex h-2 overflow-hidden rounded-full bg-zinc-800"
         role="progressbar"
       >
         <div
-          className="h-full bg-[#0f766e] transition-all"
+          className="h-full bg-emerald-500 transition-all"
           style={{ width: `${(summary.ready / summary.total) * 100}%` }}
         />
         <div
-          className="h-full bg-[#7cc4bb] transition-all"
+          className="h-full bg-teal-400 transition-all"
           style={{ width: `${(summary.active / summary.total) * 100}%` }}
         />
         <div
-          className="h-full bg-[#c44932] transition-all"
+          className="h-full bg-rose-500 transition-all"
           style={{ width: `${(summary.failed / summary.total) * 100}%` }}
         />
       </div>
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-[#5d6d68]">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-400">
         <p>{details.join(' · ')}</p>
-        <p className="font-semibold text-[#0f766e]">
+        <p className="font-semibold text-emerald-400">
           {readyPercent(summary)}% ready for export
         </p>
       </div>

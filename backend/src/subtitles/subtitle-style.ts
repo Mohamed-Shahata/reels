@@ -16,6 +16,11 @@ export const SUBTITLE_REFERENCE_WIDTH_PX = 720;
 
 export const SUBTITLE_FONT_SIZE_LIMITS = { min: 20, max: 72 } as const;
 
+export const SUBTITLE_POSITION_LIMITS = {
+  x: { min: 10, max: 90 },
+  y: { min: 5, max: 95 },
+} as const;
+
 export const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 export interface SubtitleStyle {
@@ -30,8 +35,32 @@ export interface SubtitleStyle {
   /** 0 is fully transparent, 1 is fully opaque. */
   backgroundOpacity: number;
   position: SubtitlePosition;
+  /** Free placement, % of the frame (center of the box). Overrides `position`. */
+  positionX?: number;
+  positionY?: number;
   /** Older renders were stored without it and show phrases. */
   displayMode: SubtitleDisplayMode;
+}
+
+export interface SubtitleBurnIn {
+  style: SubtitleStyle;
+  cues: Array<{
+    index: number;
+    startSec: number;
+    endSec: number;
+    text: string;
+  }>;
+}
+
+export function readStoredBurnIn(
+  styleJson: unknown,
+  cuesJson: unknown,
+): SubtitleBurnIn | null {
+  if (!styleJson || !cuesJson || !Array.isArray(cuesJson)) return null;
+  return {
+    style: styleJson as SubtitleStyle,
+    cues: cuesJson as SubtitleBurnIn['cues'],
+  };
 }
 
 export type SubtitleStyleOverrides = Partial<SubtitleStyle>;

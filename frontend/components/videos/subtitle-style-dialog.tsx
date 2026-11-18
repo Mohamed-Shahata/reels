@@ -42,7 +42,7 @@ export function SubtitleStyleDialog({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm">
       <button
         aria-label="Close subtitle style"
         className="hidden flex-1 cursor-default lg:block"
@@ -53,16 +53,16 @@ export function SubtitleStyleDialog({
       <div
         aria-labelledby={titleId}
         aria-modal="true"
-        className="flex h-full w-full flex-col bg-[#f6f8f7] shadow-2xl lg:w-[34rem]"
+        className="flex h-full w-full flex-col bg-zinc-900 border-s border-zinc-800 text-zinc-100 shadow-2xl lg:w-[34rem]"
         role="dialog"
       >
-        <div className="flex items-center justify-between border-b border-[#e2eae6] bg-white px-4 py-3">
-          <h2 className="text-sm font-semibold" id={titleId}>
+        <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-950/80 px-4 py-3 backdrop-blur-md">
+          <h2 className="text-sm font-semibold text-zinc-100" id={titleId}>
             Style Subtitles
           </h2>
           <button
             aria-label="Close"
-            className="h-8 w-8 rounded-full border border-[#d8e1dc] text-base hover:border-[#0f766e]"
+            className="h-8 w-8 rounded-full border border-zinc-700 bg-zinc-800/80 text-sm text-zinc-400 hover:border-zinc-500 hover:text-zinc-100 transition-colors"
             onClick={onClose}
             ref={closeRef}
             type="button"
@@ -70,7 +70,7 @@ export function SubtitleStyleDialog({
             ✕
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">{children}</div>
+        <div className="flex-1 overflow-y-auto p-4 bg-zinc-900">{children}</div>
       </div>
     </div>
   );

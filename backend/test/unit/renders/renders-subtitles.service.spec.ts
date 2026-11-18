@@ -6,9 +6,9 @@ import {
 import type { PrismaService } from '../../../src/prisma/prisma.service';
 import type { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
 import { RendersService } from '../../../src/renders/renders.service';
-import type { StorageService } from '../../../src/storage/storage.service';
 import { getSubtitlePreset } from '../../../src/subtitles/subtitle-style';
 import type { SubtitlesService } from '../../../src/subtitles/subtitles.service';
+import type { MediaAssetService } from '../../../src/storage/media-asset.service';
 
 const reelStyle = getSubtitlePreset('REEL').style;
 const cues = [
@@ -23,7 +23,6 @@ const clipWithTranscript = {
   video: {
     id: 'video-1',
     status: 'READY',
-    cloudinaryId: 'cloud/video-1',
     transcript: { id: 'transcript-1' },
   },
 };
@@ -54,7 +53,7 @@ function setup(
     clip?: unknown;
     existing?: unknown;
     buildCues?: jest.Mock;
-    storage?: Record<string, jest.Mock>;
+    mediaAssets?: MediaAssetService;
   } = {},
 ) {
   const clipRender = {
@@ -80,7 +79,7 @@ function setup(
     { clip, clipRender } as unknown as PrismaService,
     { createJob } as unknown as ProcessingJobsService,
     { buildCues } as unknown as SubtitlesService,
-    (options.storage ?? {}) as unknown as StorageService,
+    options.mediaAssets,
   );
   return { service, clipRender, clip, createJob, buildCues };
 }
@@ -299,7 +298,6 @@ describe('RendersService subtitles', () => {
         findFirst: jest.fn().mockResolvedValue({
           id: 'video-1',
           status: 'READY',
-          cloudinaryId: 'cloud/video-1',
           transcript: { id: 'transcript-1' },
           clips: [
             { id: 'clip-1', startSec: 0, endSec: 20 },
@@ -316,7 +314,6 @@ describe('RendersService subtitles', () => {
           createJob: jest.fn().mockResolvedValue({ id: 'job-1' }),
         } as unknown as ProcessingJobsService,
         { buildCues } as unknown as SubtitlesService,
-        {} as unknown as StorageService,
       );
 
       await service.createForVideo('user-1', 'video-1', {
@@ -354,7 +351,6 @@ describe('RendersService subtitles', () => {
         findFirst: jest.fn().mockResolvedValue({
           id: 'video-1',
           status: 'READY',
-          cloudinaryId: 'cloud/video-1',
           transcript: null,
           clips: [{ id: 'clip-1', startSec: 0, endSec: 20 }],
         }),
@@ -364,7 +360,6 @@ describe('RendersService subtitles', () => {
         { video, clipRender } as unknown as PrismaService,
         {} as unknown as ProcessingJobsService,
         {} as unknown as SubtitlesService,
-        {} as unknown as StorageService,
       );
 
       await expect(
@@ -382,36 +377,36 @@ describe('RendersService subtitles', () => {
       subtitleStyle: reelStyle,
       subtitleCues: cues,
       processingJob: { status: 'COMPLETED' },
-      clip: { id: 'clip-1', video: { cloudinaryId: 'cloud/video-1' } },
+      assetId: 'asset-1',
+      outputUrl: null,
+      clip: { id: 'clip-1' },
     };
 
     function downloadService(render: unknown) {
-      const getClipDownloadUrl = jest.fn().mockReturnValue('https://download');
-      const ensureSubtitleFile = jest.fn().mockResolvedValue(undefined);
+      const signedUrl = jest
+        .fn()
+        .mockResolvedValue('https://s3.download/video.mp4');
       const clipRender = { findFirst: jest.fn().mockResolvedValue(render) };
+      const mediaAssets = { signedUrl };
       const service = new RendersService(
         { clipRender } as unknown as PrismaService,
         {} as unknown as ProcessingJobsService,
         {} as unknown as SubtitlesService,
-        {
-          getClipDownloadUrl,
-          ensureSubtitleFile,
-        } as unknown as StorageService,
+        mediaAssets as unknown as MediaAssetService,
       );
       return {
         service,
-        getClipDownloadUrl,
-        ensureSubtitleFile,
+        signedUrl,
         clipRender,
       };
     }
 
-    it('builds the download with the stored subtitles so it matches the render', async () => {
-      const { service, getClipDownloadUrl, ensureSubtitleFile, clipRender } =
+    it('returns signed download URL from MediaAssets for a completed render', async () => {
+      const { service, signedUrl, clipRender } =
         downloadService(completedRender);
 
       await expect(service.getDownloadUrl('user-1', 'render-1')).resolves.toBe(
-        'https://download',
+        'https://s3.download/video.mp4',
       );
 
       expect(clipRender.findFirst).toHaveBeenCalledWith(
@@ -422,58 +417,42 @@ describe('RendersService subtitles', () => {
           },
         }),
       );
-      expect(getClipDownloadUrl).toHaveBeenCalledWith(
-        'cloud/video-1',
-        10,
-        30,
-        'clip-clip-1-9x16-subtitled',
-        { reframe: true, subtitles: { style: reelStyle, cues } },
-      );
-      expect(ensureSubtitleFile).toHaveBeenCalledWith({
-        style: reelStyle,
-        cues,
-      });
+      expect(signedUrl).toHaveBeenCalledWith('asset-1', 300);
     });
 
-    it('builds a plain download for a render without subtitles', async () => {
-      const { service, getClipDownloadUrl, ensureSubtitleFile } =
-        downloadService({
-          ...completedRender,
-          subtitleStyle: null,
-          subtitleCues: null,
-        });
+    it('returns outputUrl when assetId is not present', async () => {
+      const { service } = downloadService({
+        ...completedRender,
+        assetId: null,
+        outputUrl: 'https://cdn.example.com/render.mp4',
+      });
 
-      await service.getDownloadUrl('user-1', 'render-1');
-      expect(ensureSubtitleFile).not.toHaveBeenCalled();
-
-      expect(getClipDownloadUrl).toHaveBeenCalledWith(
-        'cloud/video-1',
-        10,
-        30,
-        'clip-clip-1-9x16',
-        { reframe: true, subtitles: undefined },
+      await expect(service.getDownloadUrl('user-1', 'render-1')).resolves.toBe(
+        'https://cdn.example.com/render.mp4',
       );
     });
 
     it("never exposes another user's render", async () => {
-      const { service, getClipDownloadUrl } = downloadService(null);
+      const { service, signedUrl } = downloadService(null);
 
       await expect(
         service.getDownloadUrl('user-1', 'render-1'),
       ).rejects.toBeInstanceOf(NotFoundException);
-      expect(getClipDownloadUrl).not.toHaveBeenCalled();
+      expect(signedUrl).not.toHaveBeenCalled();
     });
 
     it('refuses renders that are not finished', async () => {
-      const { service, getClipDownloadUrl } = downloadService({
+      const { service, signedUrl } = downloadService({
         ...completedRender,
+        assetId: null,
+        outputUrl: null,
         processingJob: { status: 'RUNNING' },
       });
 
       await expect(
         service.getDownloadUrl('user-1', 'render-1'),
       ).rejects.toBeInstanceOf(ConflictException);
-      expect(getClipDownloadUrl).not.toHaveBeenCalled();
+      expect(signedUrl).not.toHaveBeenCalled();
     });
   });
 
@@ -502,7 +481,6 @@ describe('RendersService subtitles', () => {
         { clipRender } as unknown as PrismaService,
         { retryJob } as unknown as ProcessingJobsService,
         { buildCues } as unknown as SubtitlesService,
-        {} as unknown as StorageService,
       );
 
       await service.retry('user-1', 'render-1');

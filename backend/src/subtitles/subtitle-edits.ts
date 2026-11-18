@@ -1,6 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import type { SubtitleCue } from './subtitle-cue-builder';
-import { normalizeCueText } from './subtitle-overlay';
+export function normalizeCueText(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim();
+}
 
 export const MAX_SUBTITLE_EDIT_TEXT_LENGTH = 200;
 

@@ -9,6 +9,7 @@ COPY nest-cli.json prisma.config.ts tsconfig.build.json tsconfig.json ./
 COPY prisma ./prisma
 COPY src ./src
 
+ENV DATABASE_URL="postgresql://placeholder:placeholder@localhost:5432/placeholder"
 RUN npm run build
 
 FROM build AS migrate

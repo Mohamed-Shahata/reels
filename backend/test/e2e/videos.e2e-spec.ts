@@ -6,7 +6,6 @@ import { AppModule } from '../../src/app.module';
 import { configureApp } from '../../src/app.setup';
 import type { ErrorResponseBody } from '../../src/common/filters/all-exceptions.filter';
 import { PrismaService } from '../../src/prisma/prisma.service';
-import { StorageService } from '../../src/storage/storage.service';
 import { TopicSegmentationService } from '../../src/segmentation/topic-segmentation.service';
 import { createPrismaFake } from '../support/prisma-fake';
 
@@ -73,8 +72,6 @@ describe('POST /api/v1/videos (e2e)', () => {
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(PrismaService)
       .useValue(prisma)
-      .overrideProvider(StorageService)
-      .useValue(storage)
       .overrideProvider(TopicSegmentationService)
       .useValue(segmentation)
       .compile();

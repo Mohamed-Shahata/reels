@@ -6,6 +6,9 @@ import { AppConfigModule } from './config/app-config.module';
 import { HealthModule } from './health/health.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
+import { RabbitModule } from './rabbit/rabbit.module';
+import { JobsModule } from './jobs/jobs.module';
+import { JobsController } from './jobs/jobs.controller';
 import { SubtitlesModule } from './subtitles/subtitles.module';
 import { ProcessingModule } from './processing/processing.module';
 import { RendersModule } from './renders/renders.module';
@@ -18,6 +21,8 @@ import { VideosModule } from './videos/videos.module';
     AppConfigModule,
     PrismaModule,
     StorageModule,
+    RabbitModule,
+    JobsModule,
     HealthModule,
     AuthModule,
     VideosModule,
@@ -25,9 +30,10 @@ import { VideosModule } from './videos/videos.module';
     RendersModule,
     SubtitlesModule,
     UsageModule,
-    ProcessingModule.register(),
+    ProcessingModule,
     SegmentationModule,
   ],
+  controllers: [JobsController],
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {

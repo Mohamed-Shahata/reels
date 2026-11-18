@@ -1,10 +1,12 @@
 'use client';
 
+import * as React from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   api,
   getApiErrorMessage,
   type LibrarySummary,
-  type Usage,
 } from '@/lib/api';
 import {
   filterVideos,
@@ -16,19 +18,17 @@ import {
 } from '@/lib/library-filters';
 import { clearPendingUploadByVideoId } from '@/lib/upload-store';
 import { useAuth } from '@/components/auth/auth-provider';
-import { AppFooter } from '@/components/layout/app-footer';
 import { AppHeader } from '@/components/layout/app-header';
 import { PageLoading } from '@/components/common/page-loading';
-import {
-  AlertBanner,
-  EmptyState,
-  LibrarySkeleton,
-  useToast,
-} from '@/components/feedback';
+import { useToast } from '@/components/feedback';
 import { VideoCard, type CardMode } from '@/components/workspace/video-card';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Button,
+  Select,
+  EmptyState,
+  Skeleton,
+} from '@/components/ui';
+import { useLanguage } from '@/lib/i18n/language-context';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -36,26 +36,28 @@ export default function Home() {
   const { status, user } = useAuth();
   const router = useRouter();
   const toast = useToast();
-  const [videos, setVideos] = useState<LibrarySummary[]>([]);
-  const [usage, setUsage] = useState<Usage | null>(null);
-  const [loadingVideos, setLoadingVideos] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<LibraryFilter>('all');
-  const [sort, setSort] = useState<LibrarySort>('recent');
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const [mode, setMode] = useState<CardMode>('view');
-  const [draftTitle, setDraftTitle] = useState('');
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const { t, language } = useLanguage();
 
-  useEffect(() => {
+  const [videos, setVideos] = React.useState<LibrarySummary[]>([]);
+  const [loadingVideos, setLoadingVideos] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [filter, setFilter] = React.useState<LibraryFilter>('all');
+  const [sort, setSort] = React.useState<LibrarySort>('recent');
+  const [activeId, setActiveId] = React.useState<string | null>(null);
+  const [mode, setMode] = React.useState<CardMode>('view');
+  const [draftTitle, setDraftTitle] = React.useState('');
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
     if (status === 'unauthenticated') {
       router.replace('/login');
     }
   }, [router, status]);
 
-  const loadLibrary = useCallback(async (initial: boolean) => {
+  const loadLibrary = React.useCallback(async (initial: boolean) => {
     try {
-      setVideos(await api.getLibrary());
+      const data = await api.getLibrary();
+      setVideos(data);
       if (initial) setError(null);
     } catch (requestError) {
       if (initial) {
@@ -68,21 +70,17 @@ export default function Home() {
     }
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (status !== 'authenticated') return;
     const timer = window.setTimeout(() => {
       void loadLibrary(true);
-      api
-        .getUsage()
-        .then(setUsage)
-        .catch(() => setUsage(null));
     }, 0);
     return () => window.clearTimeout(timer);
   }, [loadLibrary, status]);
 
-  const hasActiveWork = useMemo(() => videos.some(isInProgress), [videos]);
+  const hasActiveWork = React.useMemo(() => videos.some(isInProgress), [videos]);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (!hasActiveWork) return;
     const timer = window.setInterval(
       () => void loadLibrary(false),
@@ -91,7 +89,7 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [hasActiveWork, loadLibrary]);
 
-  const counts = useMemo(
+  const counts = React.useMemo(
     () => ({
       all: videos.length,
       completed: videos.filter(isCompleted).length,
@@ -100,7 +98,7 @@ export default function Home() {
     [videos],
   );
 
-  const visibleVideos = useMemo(
+  const visibleVideos = React.useMemo(
     () => sortVideos(filterVideos(videos, filter), sort),
     [filter, sort, videos],
   );
@@ -138,7 +136,10 @@ export default function Home() {
         ),
       );
       resetCard();
-      toast.show({ title: 'Video renamed', description: updated.title });
+      toast.show({
+        title: language === 'ar' ? 'تمت إعادة التسمية' : 'Video renamed',
+        description: updated.title,
+      });
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, 'Video could not be renamed.'));
     } finally {
@@ -154,7 +155,9 @@ export default function Home() {
       clearPendingUploadByVideoId(videoId);
       setVideos((current) => current.filter((video) => video.id !== videoId));
       resetCard();
-      toast.show({ title: 'Video deleted' });
+      toast.show({
+        title: language === 'ar' ? 'تم حذف الفيديو' : 'Video deleted',
+      });
     } catch (requestError) {
       setError(getApiErrorMessage(requestError, 'Video could not be deleted.'));
     } finally {
@@ -163,144 +166,159 @@ export default function Home() {
   }
 
   if (status === 'loading') {
-    return <PageLoading label="Loading workspace..." />;
+    return <PageLoading label={t('common.loading')} />;
   }
 
   if (status !== 'authenticated' || !user) {
     return null;
   }
 
-  const aiPercent = usage
-    ? Math.min(100, Math.round((usage.aiRuns / usage.aiRunLimit) * 100))
-    : 0;
-
   const tabs: { id: LibraryFilter; label: string }[] = [
-    { id: 'all', label: 'All Videos' },
-    { id: 'completed', label: 'Completed Reels' },
-    { id: 'in-progress', label: 'In Progress' },
+    { id: 'all', label: t('workspace.allVideos') },
+    { id: 'in-progress', label: t('workspace.inProgress') },
+    { id: 'completed', label: t('workspace.completedReels') },
   ];
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f2f9f6] text-[#172321]">
+    <div className="flex min-h-screen flex-col bg-bg text-text">
       <AppHeader />
 
-      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-8 sm:px-8">
-        <p className="font-mono text-[11px] font-semibold tracking-[0.14em] text-[#0f766e]">
-          WORKSPACE
-        </p>
-        <div className="mt-2 flex flex-wrap items-end justify-between gap-5">
+      <main className="mx-auto w-full max-w-6xl flex-1 px-4 sm:px-8 py-8 space-y-8">
+        {/* Header section with title and Upload action */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold">Your videos</h1>
-            <p className="mt-2 text-sm text-[#5d6d68]">
-              Convert Arabic episodes and streams into high-impact 9:16 vertical
-              shorts.
+            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-text">
+              {t('workspace.title')}
+            </h1>
+            <p className="mt-1 text-sm text-muted">
+              {t('workspace.subtitle')}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            {usage ? (
-              <div className="min-w-44 rounded-lg border border-[#dfe6e2] bg-white px-3 py-2">
-                <div className="flex items-center justify-between font-mono text-[10px] text-[#5d6d68]">
-                  <span>AI runs this month</span>
-                  <span className="font-semibold text-[#172321]">
-                    {usage.aiRuns} of {usage.aiRunLimit}
-                  </span>
-                </div>
-                <div
-                  aria-label="AI runs used this month"
-                  aria-valuemax={usage.aiRunLimit}
-                  aria-valuemin={0}
-                  aria-valuenow={usage.aiRuns}
-                  className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-[#e3e9e6]"
-                  role="progressbar"
-                >
-                  <div
-                    className="h-full rounded-full bg-[#0f766e]"
-                    style={{ width: `${aiPercent}%` }}
-                  />
-                </div>
-              </div>
-            ) : null}
-            <Link
-              className="inline-flex h-11 items-center rounded-lg bg-[#0f766e] px-5 text-sm font-semibold text-white transition hover:bg-[#0b615b]"
-              href="/videos/new"
-            >
-              Upload video
+
+          <div className="flex items-center gap-3">
+            <Link href="/videos/new">
+              <Button size="md" variant="primary">
+                <span className="me-1.5 text-base leading-none">+</span>
+                {t('workspace.uploadVideo')}
+              </Button>
             </Link>
           </div>
         </div>
 
-        <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2" role="tablist">
+        {/* Filter Tabs & Sorting Bar */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+          {/* Filter Pills */}
+          <div className="flex flex-wrap gap-1.5 p-1 bg-surface-2 border border-border rounded-lg text-xs" role="tablist">
             {tabs.map((tab) => (
               <button
                 aria-selected={filter === tab.id}
-                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                className={`px-3 py-1.5 rounded-md font-medium transition-all select-none ${
                   filter === tab.id
-                    ? 'border-[#0f766e] bg-[#0f766e] text-white'
-                    : 'border-[#d5dcd8] bg-white text-[#263532] hover:border-[#0f766e]'
+                    ? 'bg-surface text-text shadow-xs'
+                    : 'text-muted hover:text-text'
                 }`}
                 key={tab.id}
                 onClick={() => setFilter(tab.id)}
                 role="tab"
                 type="button"
               >
-                {tab.label} ({counts[tab.id]})
+                {tab.label}{' '}
+                <span className="opacity-75 ms-1">({counts[tab.id]})</span>
               </button>
             ))}
           </div>
-          <label className="flex items-center gap-2 text-xs text-[#5d6d68]">
-            Sort by:
-            <select
-              className="h-8 rounded-md border border-[#d5dcd8] bg-white px-2 text-xs font-medium text-[#172321]"
-              onChange={(event) => setSort(event.target.value as LibrarySort)}
-              value={sort}
-            >
-              <option value="recent">Recently Uploaded</option>
-              <option value="oldest">Oldest First</option>
-              <option value="title">Title (A–Z)</option>
-              <option value="duration">Longest First</option>
-            </select>
-          </label>
+
+          {/* Sort dropdown */}
+          <div className="flex items-center gap-2 text-xs text-muted">
+            <span>{t('common.sort')}:</span>
+            <div className="w-44">
+              <Select
+                onChange={(e) => setSort(e.target.value as LibrarySort)}
+                value={sort}
+              >
+                <option value="recent">{t('workspace.recentlyUploaded')}</option>
+                <option value="oldest">{t('workspace.oldestFirst')}</option>
+                <option value="title">{t('workspace.titleAz')}</option>
+                <option value="duration">{t('workspace.longestFirst')}</option>
+              </Select>
+            </div>
+          </div>
         </div>
 
-        {error ? (
-          <AlertBanner
-            className="mt-5"
-            onDismiss={() => setError(null)}
-            title="Something went wrong"
+        {/* Error message banner */}
+        {error && (
+          <div
+            className="rounded-xl border border-danger/30 bg-danger-soft p-4 text-sm text-danger flex items-center justify-between"
+            role="alert"
           >
-            {error}
-          </AlertBanner>
-        ) : null}
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="text-xs underline hover:opacity-80"
+            >
+              {t('common.close')}
+            </button>
+          </div>
+        )}
 
-        <div className="mt-6">
+        {/* Library Content */}
+        <div>
           {loadingVideos ? (
-            <LibrarySkeleton />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+              {Array.from({ length: 6 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-xl border border-border bg-surface p-4 space-y-3"
+                >
+                  <Skeleton className="aspect-video w-full rounded-lg" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-3 w-1/2" />
+                </div>
+              ))}
+            </div>
           ) : visibleVideos.length === 0 ? (
             <EmptyState
               action={
                 videos.length === 0 ? (
-                  <Link
-                    className="inline-flex h-10 items-center rounded-lg bg-[#0f766e] px-4 text-sm font-semibold text-white"
-                    href="/videos/new"
-                  >
-                    Upload video
+                  <Link href="/videos/new">
+                    <Button variant="primary">
+                      {t('workspace.uploadVideo')}
+                    </Button>
                   </Link>
                 ) : null
               }
               description={
                 videos.length === 0
-                  ? 'Upload a podcast to start creating reels.'
-                  : 'Try another tab to see the rest of your library.'
+                  ? t('workspace.emptyDescription')
+                  : language === 'ar'
+                    ? 'لا توجد فيديوهات تطابق هذا الفلتر.'
+                    : 'No videos match this filter.'
+              }
+              icon={
+                <svg
+                  className="h-8 w-8 text-muted"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="1.5"
+                    d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
+                  />
+                </svg>
               }
               title={
                 videos.length === 0
-                  ? 'No videos uploaded yet'
-                  : 'No videos match this filter'
+                  ? t('workspace.emptyTitle')
+                  : language === 'ar'
+                    ? 'لا توجد نتائج'
+                    : 'No videos found'
               }
             />
           ) : (
-            <ul className="grid items-start gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
               {visibleVideos.map((video) => (
                 <VideoCard
                   busy={busyId === video.id}
@@ -320,8 +338,6 @@ export default function Home() {
           )}
         </div>
       </main>
-
-      <AppFooter />
     </div>
   );
 }

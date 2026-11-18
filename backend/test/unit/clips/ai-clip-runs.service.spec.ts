@@ -28,6 +28,8 @@ function createService(
   const usage = {
     reserveAiRun:
       overrides.reserveAiRun ?? jest.fn().mockResolvedValue(undefined),
+    commitAiRun: jest.fn().mockResolvedValue(undefined),
+    releaseAiRun: jest.fn().mockResolvedValue(undefined),
   };
   const service = new AiClipRunsService(
     clips as unknown as ClipsService,

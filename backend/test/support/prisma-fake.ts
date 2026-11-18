@@ -19,7 +19,6 @@ export interface StoredVideo {
   status: 'UPLOADING' | 'READY' | 'FAILED';
   createdAt: Date;
   updatedAt: Date;
-  cloudinaryId?: string;
   durationSec?: number;
   sizeBytes?: bigint;
 }
@@ -299,10 +298,7 @@ export function createPrismaFake() {
         }: {
           where: { id: string };
           data: Partial<
-            Pick<
-              StoredVideo,
-              'cloudinaryId' | 'durationSec' | 'sizeBytes' | 'status' | 'title'
-            >
+            Pick<StoredVideo, 'durationSec' | 'sizeBytes' | 'status' | 'title'>
           >;
           select?: Record<string, boolean>;
         }) => {

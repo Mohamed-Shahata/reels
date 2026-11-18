@@ -1,24 +1,17 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { TranscriptionService } from '../../../src/transcription/transcription.service';
-import { StorageService } from '../../../src/storage/storage.service';
 import { PrismaService } from '../../../src/prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { rm, stat, writeFile } from 'node:fs/promises';
-import { Readable } from 'node:stream';
+import { rm, writeFile } from 'node:fs/promises';
 
 describe('TranscriptionService', () => {
   let service: TranscriptionService;
-  let storageService: jest.Mocked<StorageService>;
   let prismaService: jest.Mocked<PrismaService>;
   const tempDir = join(tmpdir(), 'podcast-reels');
 
   beforeEach(async () => {
-    storageService = {
-      getAudioDownloadUrl: jest.fn(),
-    } as unknown as jest.Mocked<StorageService>;
-
     prismaService = {
       $transaction: jest.fn(),
       transcript: { upsert: jest.fn() },
@@ -27,7 +20,6 @@ describe('TranscriptionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TranscriptionService,
-        { provide: StorageService, useValue: storageService },
         { provide: PrismaService, useValue: prismaService },
         {
           provide: ConfigService,
@@ -49,41 +41,6 @@ describe('TranscriptionService', () => {
     } catch {
       // ignore
     }
-  });
-
-  describe('extractAudio', () => {
-    it('should download audio from Cloudinary', async () => {
-      const videoId = 'video-1';
-      const cloudinaryId = 'cloud-1';
-      const url = 'https://cloudinary.com/audio.mp3';
-
-      storageService.getAudioDownloadUrl.mockReturnValue(url);
-
-      const testBuffer = Buffer.from('test audio content');
-
-      const mockBody = { getReader: jest.fn() };
-
-      (global.fetch as jest.Mock).mockResolvedValue({
-        ok: true,
-        body: mockBody,
-      });
-
-      jest
-        .spyOn(Readable, 'fromWeb')
-        .mockReturnValue(Readable.from(testBuffer));
-
-      const result = await service.extractAudio(videoId, cloudinaryId);
-      expect(result).toBe(join(tempDir, `${videoId}.mp3`));
-
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(storageService.getAudioDownloadUrl).toHaveBeenCalledWith(
-        cloudinaryId,
-      );
-      expect(global.fetch).toHaveBeenCalledWith(url);
-
-      const fileStat = await stat(result);
-      expect(fileStat.size).toBe(testBuffer.length);
-    });
   });
 
   describe('chunkAudio', () => {
@@ -163,7 +120,6 @@ describe('TranscriptionService', () => {
 
       await service.mergeAndStore('video-4', chunks, chunkSegments, 'ar');
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
       expect(prismaService.$transaction).toHaveBeenCalledTimes(1);
       expect(captured.length).toBe(1);
     });

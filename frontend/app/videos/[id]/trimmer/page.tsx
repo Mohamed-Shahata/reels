@@ -2,7 +2,6 @@
 
 import { useAuth } from '@/components/auth/auth-provider';
 import { PageLoading } from '@/components/common/page-loading';
-import { AppFooter } from '@/components/layout/app-footer';
 import { AppHeader } from '@/components/layout/app-header';
 import {
   api,
@@ -954,7 +953,6 @@ export default function TrimmerPage() {
           </>
         ) : null}
       </main>
-      <AppFooter />
     </div>
   );
 }

@@ -1,6 +1,5 @@
 import { CopyUrlButton } from '@/components/common/copy-url-button';
 import { RequestedPath } from '@/components/common/requested-path';
-import { AppFooter } from '@/components/layout/app-footer';
 import { AppHeader } from '@/components/layout/app-header';
 import type { Metadata } from 'next';
 import Link from 'next/link';
@@ -133,7 +132,6 @@ export default function NotFound() {
           </div>
         </section>
       </main>
-      <AppFooter />
     </>
   );
 }

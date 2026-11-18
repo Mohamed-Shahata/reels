@@ -4,7 +4,9 @@ import type { SubtitleStyle, SubtitleStyleCatalog } from '@/lib/api';
 import {
   FONT_STACKS,
   getPreviewTextStyle,
+  hasFreePosition,
   isCustomized,
+  presetPositionPatch,
   type SubtitleSelection,
 } from '@/lib/subtitle-style';
 
@@ -417,7 +419,8 @@ export function SubtitleStylePanel({
           role="radiogroup"
         >
           {catalog.positions.map((position) => {
-            const active = position === style.position;
+            const active =
+              position === style.position && !hasFreePosition(style);
             return (
               <button
                 aria-checked={active}
@@ -427,7 +430,7 @@ export function SubtitleStylePanel({
                     : 'bg-[#f0f6f3] hover:bg-[#e3f2ef]'
                 }`}
                 key={position}
-                onClick={() => onChangeStyle({ position })}
+                onClick={() => onChangeStyle(presetPositionPatch(position))}
                 role="radio"
                 type="button"
               >

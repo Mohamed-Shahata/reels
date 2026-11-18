@@ -106,4 +106,23 @@ describe('UsageService.reserveAiRun', () => {
       message: 'Monthly AI run limit of 5 has been reached',
     });
   });
+
+  it('releases an AI run by decrementing the counter', async () => {
+    const usageRecord = {
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    };
+
+    await expect(
+      createService({ usageRecord }, 5).releaseAiRun('user-1'),
+    ).resolves.toBeUndefined();
+
+    expect(usageRecord.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: 'user-1',
+        monthStart: expect.any(Date) as Date,
+        aiRunCount: { gt: 0 },
+      },
+      data: { aiRunCount: { decrement: 1 } },
+    });
+  });
 });

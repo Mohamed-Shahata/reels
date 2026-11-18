@@ -53,6 +53,7 @@ export function isCustomized(
 ): boolean {
   const preset = findPreset(catalog, selection.presetId);
   const keys = Object.keys(preset.style) as (keyof SubtitleStyle)[];
+  if (hasFreePosition(selection.style)) return true;
   return keys.some((key) => {
     const current = selection.style[key];
     const original = preset.style[key];
@@ -136,6 +137,80 @@ export function getPreviewTextStyle(style: SubtitleStyle): CSSProperties {
     backgroundColor: hexToRgba(style.backgroundColor, style.backgroundOpacity),
     // Same curve as the burned-in box: 14 px on the 720 px reference frame.
     borderRadius: `${((SUBTITLE_BOX_RADIUS_REFERENCE_PX / SUBTITLE_REFERENCE_WIDTH_PX) * 100).toFixed(3)}cqw`,
+  };
+}
+
+export const POSITION_LIMITS = {
+  x: { min: 10, max: 90 },
+  y: { min: 5, max: 95 },
+} as const;
+
+/** Centering aids: a point within this many % of the target snaps to it. */
+export const SNAP_THRESHOLD_PCT = 2.5;
+
+const PRESET_Y: Record<SubtitleStyle['position'], number> = {
+  TOP: 18,
+  MIDDLE: 50,
+  BOTTOM: 82,
+};
+
+export interface SubtitlePoint {
+  x: number;
+  y: number;
+}
+
+export function getSubtitlePoint(style: SubtitleStyle): SubtitlePoint {
+  return {
+    x: style.positionX ?? 50,
+    y: style.positionY ?? PRESET_Y[style.position],
+  };
+}
+
+export function hasFreePosition(style: SubtitleStyle): boolean {
+  return (
+    typeof style.positionX === 'number' && typeof style.positionY === 'number'
+  );
+}
+
+export interface SnapResult {
+  point: SubtitlePoint;
+  centeredX: boolean;
+  centeredY: boolean;
+}
+
+export function snapPoint(raw: SubtitlePoint): SnapResult {
+  const clamp = (v: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, v));
+  let x = clamp(raw.x, POSITION_LIMITS.x.min, POSITION_LIMITS.x.max);
+  let y = clamp(raw.y, POSITION_LIMITS.y.min, POSITION_LIMITS.y.max);
+  const centeredX = Math.abs(x - 50) <= SNAP_THRESHOLD_PCT;
+  const centeredY = Math.abs(y - 50) <= SNAP_THRESHOLD_PCT;
+  if (centeredX) x = 50;
+  if (centeredY) y = 50;
+  return {
+    point: { x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 },
+    centeredX,
+    centeredY,
+  };
+}
+
+/** Style patch that moves the subtitle to a point (free placement). */
+export function pointPatch(point: SubtitlePoint): Partial<SubtitleStyle> {
+  return { positionX: point.x, positionY: point.y };
+}
+
+/** Style patch for the TOP / MIDDLE / BOTTOM buttons: drops free placement. */
+export function presetPositionPatch(
+  position: SubtitleStyle['position'],
+): Partial<SubtitleStyle> {
+  return { position, positionX: undefined, positionY: undefined };
+}
+
+export function getPreviewFreeStyle(point: SubtitlePoint): CSSProperties {
+  return {
+    left: `${point.x}%`,
+    top: `${point.y}%`,
+    transform: 'translate(-50%, -50%)',
   };
 }
 

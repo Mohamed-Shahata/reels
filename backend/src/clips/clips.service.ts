@@ -1,19 +1,27 @@
+import type { Response } from 'express';
+import { tmpdir } from 'node:os';
+import { readFile, unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env.schema';
 import { PrismaService } from '../prisma/prisma.service';
-import { StorageService } from '../storage/storage.service';
+import { MediaAssetService } from '../storage/media-asset.service';
+import { ProcessingJobsService } from '../processing/processing-jobs.service';
+import { FfmpegRenderService } from '../renders/ffmpeg-render.service';
 import type { ClipUrlOptions } from '../storage/storage.types';
 import type { CreateClipDto } from './dto/create-clip.dto';
 import type { UpdateClipDto } from './dto/update-clip.dto';
 import type { SplitClipDto } from './dto/split-clip.dto';
 import type { MergeClipsDto } from './dto/merge-clips.dto';
 import type { ReconciledTopicSegment } from '../segmentation/boundary-reconciliation.service';
+import { VideoLayout } from '../generated/prisma/client';
 
 const clipSelect = {
   id: true,
@@ -22,15 +30,21 @@ const clipSelect = {
   startSec: true,
   endSec: true,
   source: true,
+  status: true,
+  layout: true,
+  score: true,
+  reason: true,
+  thumbnailUrl: true,
   createdAt: true,
   updatedAt: true,
 } as const;
 
 const clipWithVideoSelect = {
   id: true,
+  videoId: true,
   startSec: true,
   endSec: true,
-  video: { select: { cloudinaryId: true } },
+  video: { select: { id: true } },
 } as const;
 
 const aiRunSelect = {
@@ -58,19 +72,27 @@ export interface ClipRecord {
   startSec: number;
   endSec: number;
   source: 'MANUAL' | 'AI';
+  status: 'DRAFT' | 'READY' | 'FAILED';
+  layout: VideoLayout;
+  score: number | null;
+  reason: string | null;
+  thumbnailUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 @Injectable()
 export class ClipsService {
+  private readonly logger = new Logger(ClipsService.name);
   private readonly minDurationSec: number;
   private readonly maxDurationSec: number;
 
   constructor(
     private readonly prisma: PrismaService,
     config: ConfigService<Env, true>,
-    private readonly storage: StorageService,
+    private readonly jobsService?: ProcessingJobsService,
+    private readonly mediaAssets?: MediaAssetService,
+    private readonly ffmpegRender?: FfmpegRenderService,
   ) {
     this.minDurationSec = config.get('CLIP_MIN_DURATION_SEC', {
       infer: true,
@@ -97,6 +119,17 @@ export class ClipsService {
       },
       select: clipSelect,
     });
+
+    if (this.mediaAssets && this.ffmpegRender) {
+      void this.generateClipThumbnail(
+        userId,
+        videoId,
+        created.id,
+        dto.startSec,
+      );
+      created.thumbnailUrl = `/api/v1/clips/${created.id}/thumbnail`;
+    }
+
     await this.recordClipUsage(userId);
     return created;
   }
@@ -160,9 +193,13 @@ export class ClipsService {
           startSec: segment.startSec,
           endSec: segment.endSec,
           source: 'AI' as const,
+          status: 'DRAFT' as const,
+          score: segment.score ?? null,
+          reason: segment.reason ?? segment.summary ?? null,
         })),
         select: clipSelect,
       });
+
       await this.recordClipUsage(userId, segments.length, transaction);
       await transaction.segmentationRun.create({
         data: {
@@ -190,7 +227,8 @@ export class ClipsService {
     if (
       dto.title === undefined &&
       dto.startSec === undefined &&
-      dto.endSec === undefined
+      dto.endSec === undefined &&
+      dto.layout === undefined
     ) {
       throw new BadRequestException(
         'Provide at least one clip field to update',
@@ -223,6 +261,7 @@ export class ClipsService {
         ...(dto.title !== undefined && { title: dto.title }),
         ...(dto.startSec !== undefined && { startSec: dto.startSec }),
         ...(dto.endSec !== undefined && { endSec: dto.endSec }),
+        ...(dto.layout !== undefined && { layout: dto.layout }),
         source: 'MANUAL',
       },
       select: clipSelect,
@@ -259,6 +298,17 @@ export class ClipsService {
         },
         select: clipSelect,
       });
+
+      if (this.mediaAssets && this.ffmpegRender) {
+        void this.generateClipThumbnail(
+          userId,
+          clip.video.id,
+          second.id,
+          dto.splitSec,
+        );
+        second.thumbnailUrl = `/api/v1/clips/${second.id}/thumbnail`;
+      }
+
       await this.recordClipUsage(userId, 1, transaction);
       return [first, second];
     });
@@ -294,11 +344,29 @@ export class ClipsService {
     this.validateRange(startSec, endSec, video.durationSec);
 
     return this.prisma.$transaction(async (transaction) => {
+      let thumbUrl: string | null = null;
+      if (this.mediaAssets && this.ffmpegRender) {
+        void this.generateClipThumbnail(
+          userId,
+          video.id,
+          ordered[0].id,
+          startSec,
+        );
+        thumbUrl = `/api/v1/clips/${ordered[0].id}/thumbnail`;
+      }
+
       const merged = await transaction.clip.update({
         where: { id: ordered[0].id },
-        data: { title: dto.title, startSec, endSec, source: 'MANUAL' },
+        data: {
+          title: dto.title,
+          startSec,
+          endSec,
+          source: 'MANUAL',
+          ...(thumbUrl && { thumbnailUrl: thumbUrl }),
+        },
         select: clipSelect,
       });
+
       await Promise.all(
         ordered
           .slice(1)
@@ -311,54 +379,189 @@ export class ClipsService {
   async remove(userId: string, clipId: string): Promise<void> {
     const clip = await this.prisma.clip.findFirst({
       where: { id: clipId, video: { is: { userId } } },
-      select: { id: true },
+      select: { id: true, videoId: true },
     });
 
     if (!clip) {
       throw new NotFoundException('Clip was not found');
     }
 
-    await this.prisma.clip.delete({ where: { id: clip.id } });
+    if (this.prisma.$transaction && this.jobsService) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.mediaAsset?.updateMany({
+          where: { clipId: clip.id, status: { not: 'DELETED' } },
+          data: { status: 'DELETING' },
+        });
+
+        await this.jobsService!.enqueue(tx, {
+          userId,
+          videoId: clip.videoId,
+          type: 'CLEANUP',
+          payload: { clipId: clip.id, videoId: clip.videoId, userId },
+          maxAttempts: 10,
+        });
+
+        await tx.clip.delete({ where: { id: clip.id } });
+      });
+    } else {
+      await this.prisma.clip.delete({ where: { id: clip.id } });
+    }
   }
 
   async getPlaybackUrl(
     userId: string,
     clipId: string,
-    options: ClipUrlOptions = {},
+    _options: ClipUrlOptions = {},
   ): Promise<string> {
     const clip = await this.getOwnedStoredClip(userId, clipId);
 
-    return this.storage.getClipPlaybackUrl(
-      clip.video.cloudinaryId,
-      clip.startSec,
-      clip.endSec,
-      options,
-    );
+    if (this.mediaAssets && this.prisma.mediaAsset) {
+      const asset = await this.prisma.mediaAsset.findFirst({
+        where: {
+          videoId: clip.video.id,
+          kind: { in: ['PROXY', 'SOURCE'] },
+          status: 'READY',
+        },
+        orderBy: { kind: 'asc' },
+      });
+      if (asset) {
+        return this.mediaAssets.signedUrl(asset.storageKey, 3600);
+      }
+    }
+
+    throw new NotFoundException('Playback asset was not found');
   }
 
   async getDownloadUrl(
     userId: string,
     clipId: string,
-    options: ClipUrlOptions = {},
+    _options: ClipUrlOptions = {},
   ): Promise<string> {
     const clip = await this.getOwnedStoredClip(userId, clipId);
-    const filename = options.reframe
-      ? `clip-${clip.id}-9x16`
-      : `clip-${clip.id}`;
 
-    return this.storage.getClipDownloadUrl(
-      clip.video.cloudinaryId,
-      clip.startSec,
-      clip.endSec,
-      filename,
-      options,
+    if (this.mediaAssets && this.prisma.mediaAsset) {
+      const renderAsset = await this.prisma.mediaAsset.findFirst({
+        where: { clipId: clip.id, kind: 'RENDER', status: 'READY' },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (renderAsset) {
+        return this.mediaAssets.signedUrl(renderAsset.storageKey, 300);
+      }
+    }
+
+    throw new NotFoundException('Download asset was not found');
+  }
+
+  async downloadClipFile(
+    clipId: string,
+    _filename: string,
+    _reframe: boolean,
+    res: Response,
+  ): Promise<void> {
+    if (!this.mediaAssets) {
+      throw new NotFoundException('Clip was not found');
+    }
+
+    const clip = await this.prisma.clip.findUnique({
+      where: { id: clipId },
+      include: {
+        mediaAssets: {
+          where: { kind: 'RENDER', status: 'READY' },
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+
+    if (!clip || clip.mediaAssets.length === 0) {
+      throw new NotFoundException('Rendered file was not found');
+    }
+
+    const downloadUrl = await this.mediaAssets.signedUrl(
+      clip.mediaAssets[0].storageKey,
+      300,
     );
+    res.redirect(downloadUrl);
+  }
+
+  async serveThumbnail(clipId: string, res: Response): Promise<void> {
+    if (this.mediaAssets) {
+      const thumbAsset = await this.prisma.mediaAsset.findFirst({
+        where: { clipId, kind: 'THUMB', status: 'READY' },
+      });
+      if (thumbAsset) {
+        const url = await this.mediaAssets.signedUrl(thumbAsset.id, 300);
+        return res.redirect(302, url);
+      }
+    }
+
+    throw new NotFoundException('Clip thumbnail was not found');
+  }
+
+  async generateClipThumbnail(
+    userId: string,
+    videoId: string,
+    clipId: string,
+    startSec: number,
+  ): Promise<string | null> {
+    if (!this.mediaAssets || !this.ffmpegRender) return null;
+    try {
+      const asset = await this.prisma.mediaAsset.findFirst({
+        where: {
+          videoId,
+          kind: { in: ['PROXY', 'SOURCE'] },
+          status: 'READY',
+        },
+        orderBy: { kind: 'asc' },
+      });
+      if (!asset) return null;
+
+      const signedUrl = await this.mediaAssets.signedUrl(asset.id, 300);
+      const tmpDir = tmpdir();
+      const localThumbPath = join(tmpDir, `thumb-${clipId}-${Date.now()}.jpg`);
+
+      await this.ffmpegRender.extractThumbnail(
+        signedUrl,
+        localThumbPath,
+        startSec,
+      );
+      const buffer = await readFile(localThumbPath);
+      await this.mediaAssets.putAsset({
+        userId,
+        videoId,
+        clipId,
+        kind: 'THUMB',
+        body: buffer,
+        contentType: 'image/jpeg',
+      });
+
+      try {
+        await unlink(localThumbPath);
+      } catch {
+        // ignore
+      }
+
+      const thumbnailUrl = `/api/v1/clips/${clipId}/thumbnail`;
+      await this.prisma.clip.update({
+        where: { id: clipId },
+        data: { thumbnailUrl },
+      });
+      return thumbnailUrl;
+    } catch (err) {
+      this.logger.warn(
+        `Failed to generate clip thumbnail for clip ${clipId}: ${(err as Error).message}`,
+      );
+      return null;
+    }
   }
 
   private async getOwnedVideo(userId: string, videoId: string) {
     const video = await this.prisma.video.findFirst({
       where: { id: videoId, userId },
-      select: { id: true, status: true, durationSec: true },
+      select: {
+        id: true,
+        status: true,
+        durationSec: true,
+      },
     });
 
     if (!video) {
@@ -380,12 +583,11 @@ export class ClipsService {
       select: clipWithVideoSelect,
     });
 
-    const publicId = clip?.video.cloudinaryId;
-    if (!clip || !publicId) {
+    if (!clip) {
       throw new NotFoundException('Clip was not found');
     }
 
-    return { ...clip, video: { ...clip.video, cloudinaryId: publicId } };
+    return clip;
   }
 
   private async getOwnedEditableClip(userId: string, clipId: string) {
@@ -396,7 +598,14 @@ export class ClipsService {
         title: true,
         startSec: true,
         endSec: true,
-        video: { select: { id: true, status: true, durationSec: true } },
+        thumbnailUrl: true,
+        video: {
+          select: {
+            id: true,
+            status: true,
+            durationSec: true,
+          },
+        },
       },
     });
     if (!clip) {

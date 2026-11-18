@@ -8,7 +8,6 @@ import {
   WorkspaceSkeleton,
   useToast,
 } from '@/components/feedback';
-import { AppFooter } from '@/components/layout/app-footer';
 import { AppHeader } from '@/components/layout/app-header';
 import { AiClipsDialog } from '@/components/videos/ai-clips-dialog';
 import { AiClipsProgress } from '@/components/videos/ai-clips-progress';
@@ -102,7 +101,7 @@ const TABS: { key: WorkspaceTab; label: string; hint: string }[] = [
 ];
 
 const card =
-  'rounded-2xl border border-[#e2eae6] bg-white p-5 shadow-[var(--shadow-surface)]';
+  'rounded-2xl border border-zinc-800 bg-zinc-900/80 p-5 shadow-2xl backdrop-blur-sm';
 
 function CheckIcon({ size = 16 }: { size?: number }) {
   return (
@@ -235,12 +234,14 @@ function ClipCardWithReel({
     onToggleSubtitles: (enabled) => burnIn.setForClip(clip.id, enabled),
     render: getRenderForClip(clip),
     subtitlesAvailable,
-    thumbnailUrl: clipThumbnailUrl(
-      episodeUrl,
-      clip.startSec,
-      clip.endSec,
-      aspect,
-    ),
+    thumbnailUrl:
+      clip.thumbnailUrl ||
+      clipThumbnailUrl(
+        episodeUrl,
+        clip.startSec,
+        clip.endSec,
+        aspect,
+      ),
   });
 
   return (
@@ -1306,13 +1307,13 @@ function VideoWorkspace() {
   }
 
   return (
-    <div className="min-h-screen bg-[#eef3f0] text-[#172321]">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100">
       <AppHeader />
       <main className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3">
             <Link
-              className="inline-flex items-center gap-1.5 rounded-full border border-[#d5e2dc] bg-white px-3 py-1.5 font-semibold text-[#0f766e] hover:border-[#0f766e] hover:bg-[#e4f3ef]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 font-semibold text-emerald-400 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-colors"
               href="/"
             >
               <svg
@@ -1330,24 +1331,24 @@ function VideoWorkspace() {
               </svg>
               Back to workspace
             </Link>
-            <span className="text-[#5d6d68]">Video editor</span>
+            <span className="text-zinc-400">Video editor</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {transcript ? (
-              <span className="rounded-full bg-white px-3 py-1.5 font-semibold text-[#5d6d68] ring-1 ring-[#e2eae6]">
+              <span className="rounded-full bg-zinc-900/80 px-3 py-1.5 font-semibold text-zinc-400 border border-zinc-800">
                 {wordCount.toLocaleString()} words ·{' '}
                 {transcript.segments.length} segments
               </span>
             ) : null}
             {duration ? (
-              <span className="rounded-full bg-[#e4f3ef] px-3 py-1.5 font-semibold text-[#0f766e]">
+              <span className="rounded-full bg-emerald-500/15 px-3 py-1.5 font-semibold text-emerald-400 border border-emerald-500/30">
                 {formatClock(duration)} total duration
               </span>
             ) : null}
           </div>
         </div>
         <h1
-          className="mt-4 text-2xl font-extrabold leading-snug tracking-tight sm:text-[2rem]"
+          className="mt-4 text-2xl font-extrabold leading-snug tracking-tight text-zinc-100 sm:text-[2rem]"
           dir="auto"
           style={{ fontFamily: 'var(--font-cairo), sans-serif' }}
         >
@@ -1361,22 +1362,22 @@ function VideoWorkspace() {
             const active = number === currentStep;
             return (
               <li
-                className={`flex items-center gap-3 rounded-2xl border px-4 py-3 ${
+                className={`flex items-center gap-3 rounded-2xl border px-4 py-3 transition-colors ${
                   active
-                    ? 'border-[#0f766e] bg-[#e4f3ef] shadow-[0_0_0_3px_rgba(15,118,110,0.10)]'
+                    ? 'border-emerald-500/80 bg-emerald-500/10 shadow-[0_0_0_2px_rgba(16,185,129,0.2)]'
                     : done
-                      ? 'border-[#cfe6df] bg-white'
-                      : 'border-[#e2eae6] bg-white/60'
+                      ? 'border-zinc-800 bg-zinc-900/80 text-zinc-200'
+                      : 'border-zinc-800/60 bg-zinc-900/40 text-zinc-500'
                 }`}
                 key={step.title}
               >
                 <span
                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-bold ${
                     done
-                      ? 'bg-[#0f766e] text-white'
+                      ? 'bg-emerald-500 text-zinc-950'
                       : active
-                        ? 'border-2 border-[#0f766e] bg-white text-[#0f766e]'
-                        : 'bg-[#e7eeea] text-[#7b8a85]'
+                        ? 'border-2 border-emerald-500 bg-zinc-900 text-emerald-400'
+                        : 'bg-zinc-800 text-zinc-500'
                   }`}
                 >
                   {done ? <CheckIcon /> : number}
@@ -1384,7 +1385,7 @@ function VideoWorkspace() {
                 <span className="min-w-0">
                   <span
                     className={`block text-[11px] font-semibold ${
-                      active ? 'text-[#0f766e]' : 'text-[#7b8a85]'
+                      active ? 'text-emerald-400' : 'text-zinc-400'
                     }`}
                   >
                     {active ? 'In progress' : done ? 'Done' : step.sub}
@@ -1401,13 +1402,13 @@ function VideoWorkspace() {
         {latestJob && latestJob.status !== 'COMPLETED' ? (
           <section
             aria-label="Transcription status"
-            className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-[#e2eae6] bg-white px-5 py-3 shadow-[var(--shadow-surface)]"
+            className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 px-5 py-3 shadow-xl backdrop-blur-sm"
           >
             <span
               className={`inline-flex items-center gap-2 text-sm font-bold ${
                 latestJob.status === 'FAILED'
-                  ? 'text-[#c44932]'
-                  : 'text-[#0f766e]'
+                  ? 'text-rose-400'
+                  : 'text-emerald-400'
               }`}
             >
               <span
@@ -1423,7 +1424,7 @@ function VideoWorkspace() {
             </span>
             {latestJob.status === 'FAILED' ? (
               <button
-                className="h-8 rounded-lg border border-[#0f766e] px-3 text-xs font-bold text-[#0f766e] hover:bg-[#e4f3ef]"
+                className="h-8 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 text-xs font-bold text-rose-400 hover:bg-rose-500/20 transition-colors"
                 onClick={() => void handleStartTranscription()}
                 type="button"
               >
@@ -1435,11 +1436,11 @@ function VideoWorkspace() {
                 aria-valuemax={100}
                 aria-valuemin={0}
                 aria-valuenow={latestJob.progress}
-                className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-[#e3ece8]"
+                className="h-1.5 min-w-32 flex-1 overflow-hidden rounded-full bg-zinc-800"
                 role="progressbar"
               >
                 <div
-                  className="h-full rounded-full bg-[#0f766e] transition-[width] duration-700 ease-linear"
+                  className="h-full rounded-full bg-emerald-500 transition-[width] duration-700 ease-linear"
                   style={{ width: `${latestJob.progress}%` }}
                 />
               </div>
@@ -1484,17 +1485,17 @@ function VideoWorkspace() {
           <>
             <div
               aria-label="Workspace sections"
-              className="mt-5 inline-flex gap-1 rounded-2xl border border-[#e2eae6] bg-white p-1.5 shadow-[var(--shadow-surface)]"
+              className="mt-5 inline-flex gap-1 rounded-2xl border border-zinc-800 bg-zinc-900/90 p-1.5 shadow-xl backdrop-blur-md"
               role="tablist"
             >
               {TABS.map((item, index) => (
                 <button
                   aria-controls={`workspace-panel-${item.key}`}
                   aria-selected={tab === item.key}
-                  className={`flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-left ${
+                  className={`flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-left transition-all ${
                     tab === item.key
-                      ? 'bg-[#0f766e] text-white shadow-[0_4px_12px_-4px_rgba(15,118,110,0.55)]'
-                      : 'text-[#5d6d68] hover:bg-[#f2f6f4]'
+                      ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20'
+                      : 'text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-200'
                   }`}
                   id={`workspace-tab-${item.key}`}
                   key={item.key}
@@ -1511,7 +1512,7 @@ function VideoWorkspace() {
                     </span>
                     <span
                       className={`block text-[11px] leading-tight ${
-                        tab === item.key ? 'text-white/80' : 'text-[#7b8a85]'
+                        tab === item.key ? 'text-zinc-900 font-semibold' : 'text-zinc-500'
                       }`}
                     >
                       {item.hint}
@@ -1532,6 +1533,11 @@ function VideoWorkspace() {
                         ? STYLE_SAMPLE_WORD
                         : STYLE_SAMPLE_CAPTION
                       : null)
+                  }
+                  onSubtitleMove={
+                    styleOpen || tab === 'clips'
+                      ? subtitleStyle.patchStyle
+                      : null
                   }
                   onSubtitlesToggle={() => setStageSubtitles((on) => !on)}
                   subtitlesDisabled={!transcript?.segments.length}
@@ -1569,8 +1575,8 @@ function VideoWorkspace() {
                 />
                 {tab === 'clips' ? (
                   <section className={`${card} mt-4`}>
-                    <h2 className="text-base font-bold">Hook detection</h2>
-                    <p className="mt-1 text-xs text-[#5d6d68]">
+                    <h2 className="text-base font-bold text-zinc-100">Hook detection</h2>
+                    <p className="mt-1 text-xs text-zinc-400">
                       Clips are scored from their length, speech density and
                       whether the opening line is a question or a hook phrase in
                       Arabic or English. The score is an estimate, not an AI
@@ -1594,13 +1600,13 @@ function VideoWorkspace() {
                       transcript={transcript}
                     />
                     {transcribed ? (
-                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-[#e2eae6] bg-white px-4 py-3 text-xs shadow-[var(--shadow-surface)]">
+                      <div className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/80 px-4 py-3 text-xs text-zinc-300 shadow-xl backdrop-blur-sm">
                         <span>
                           Subtitle style
                           {subtitleStyle.selection ? (
                             <>
                               :{' '}
-                              <strong>
+                              <strong className="text-zinc-100">
                                 {subtitleStyle.selection.style.fontFamily}{' '}
                                 {subtitleStyle.selection.style.fontSizePx}px ·{' '}
                                 {subtitleStyle.selection.style.position.toLowerCase()}{' '}
@@ -1614,7 +1620,7 @@ function VideoWorkspace() {
                           ) : null}
                         </span>
                         <button
-                          className="h-8 rounded-lg border border-[#0f766e] px-3 font-semibold text-[#0f766e] hover:bg-[#e4f3ef]"
+                          className="h-8 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-3 font-semibold text-emerald-400 hover:bg-emerald-500/20 transition-colors"
                           onClick={openStyleDialog}
                           type="button"
                         >
@@ -1626,16 +1632,16 @@ function VideoWorkspace() {
                     {/* Clips: manage, render, export */}
                     <aside className={card}>
                       <div className="flex items-center justify-between gap-2">
-                        <h2 className="text-base font-bold">
+                        <h2 className="text-base font-bold text-zinc-100">
                           Existing Clips{' '}
-                          <span className="ml-1 rounded-full bg-[#e4f3ef] px-2 py-0.5 text-xs font-bold text-[#0f766e]">
+                          <span className="ml-1 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-400">
                             {clips.length}
                           </span>
                         </h2>
                         <div className="flex items-center gap-2">
                           {selectedClipIds.length >= 2 ? (
                             <button
-                              className="h-8 rounded-lg border border-[#0f766e] px-2 text-xs font-semibold text-[#0f766e] disabled:opacity-50"
+                              className="h-8 rounded-lg border border-emerald-500/50 bg-emerald-500/10 px-2.5 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50 transition-colors"
                               disabled={clipActionId !== null}
                               onClick={() => void mergeSelectedClips()}
                               type="button"
@@ -1647,7 +1653,7 @@ function VideoWorkspace() {
                           ) : null}
                           {transcript?.segments.length ? (
                             <button
-                              className="h-8 rounded-lg bg-[#0f766e] px-3 text-xs font-semibold text-white hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
+                              className="h-8 rounded-lg bg-emerald-500 px-3 text-xs font-bold text-zinc-950 shadow-md shadow-emerald-500/20 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 transition-colors"
                               disabled={creatingAiClips || aiRunsExhausted}
                               onClick={requestAiClips}
                               type="button"
@@ -1662,7 +1668,7 @@ function VideoWorkspace() {
                         </div>
                       </div>
                       {usage ? (
-                        <p className="mt-1 text-[11px] text-[#5d6d68]">
+                        <p className="mt-1 text-[11px] text-zinc-400">
                           {aiRunsExhausted
                             ? `Monthly AI run limit reached (${usage.aiRuns} of ${usage.aiRunLimit}).`
                             : `AI runs this month: ${usage.aiRuns} of ${usage.aiRunLimit}.`}
@@ -1688,10 +1694,10 @@ function VideoWorkspace() {
                           ] as const
                         ).map(([key, label]) => (
                           <button
-                            className={`rounded-full px-3 py-1.5 ${
+                            className={`rounded-full px-3 py-1.5 transition-colors ${
                               clipFilter === key
-                                ? 'bg-[#0f766e] text-white'
-                                : 'bg-[#f2f6f4] text-[#4b5d57] hover:bg-[#e4f3ef] hover:text-[#0f766e]'
+                                ? 'bg-emerald-500 text-zinc-950 font-bold shadow-md shadow-emerald-500/20'
+                                : 'border border-zinc-700/60 bg-zinc-800/80 text-zinc-300 hover:border-zinc-600 hover:text-zinc-100'
                             }`}
                             key={key}
                             onClick={() => setClipFilter(key)}
@@ -1702,7 +1708,7 @@ function VideoWorkspace() {
                         ))}
                         {visibleClips.length > 1 ? (
                           <button
-                            className="ml-auto rounded-full border border-[#0f766e] px-2.5 py-1 text-[#0f766e]"
+                            className="ml-auto rounded-full border border-zinc-700 bg-zinc-800/80 px-2.5 py-1 text-zinc-300 hover:border-emerald-500/50 hover:text-emerald-400 transition-colors"
                             onClick={toggleSelectAll}
                             type="button"
                           >
@@ -1717,15 +1723,15 @@ function VideoWorkspace() {
 
                       {selectedClipIds.length > 0 ? (
                         <div
-                          className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[#0f766e] bg-[#e4f3ef] px-3 py-2 text-xs"
+                          className="mt-3 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3.5 py-2.5 text-xs text-emerald-300 backdrop-blur-sm shadow-lg"
                           role="group"
                           aria-label="Selected clips"
                         >
-                          <strong className="mr-auto text-[#0b615b]">
+                          <strong className="mr-auto font-bold text-emerald-300">
                             {selectedClipIds.length} selected
                           </strong>
                           <button
-                            className="h-8 rounded-lg bg-[#0f766e] px-3 font-semibold text-white hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
+                            className="h-8 rounded-lg bg-emerald-500 px-3.5 font-bold text-zinc-950 shadow-md shadow-emerald-500/20 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 transition-colors"
                             disabled={
                               renders.renderingAll || !subtitlesAvailable
                             }
@@ -1735,7 +1741,7 @@ function VideoWorkspace() {
                             Render with subtitles
                           </button>
                           <button
-                            className="h-8 rounded-lg border border-[#0f766e] bg-white px-3 font-semibold text-[#0f766e] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="h-8 rounded-lg border border-zinc-700 bg-zinc-800 px-3.5 font-semibold text-zinc-200 hover:border-zinc-600 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                             disabled={renders.renderingAll}
                             onClick={() => renderSelected(false)}
                             type="button"
@@ -1743,7 +1749,7 @@ function VideoWorkspace() {
                             Render without subtitles
                           </button>
                           <button
-                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#0f766e] bg-white px-3 font-semibold text-[#0f766e] hover:bg-[#e4f3ef] disabled:cursor-not-allowed disabled:opacity-50"
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-500/50 bg-zinc-800/90 px-3.5 font-semibold text-emerald-400 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
                             disabled={downloadIds !== null}
                             onClick={() =>
                               openDownload(selectedClipIds, '9:16')
@@ -1947,7 +1953,6 @@ function VideoWorkspace() {
         subtitles={downloadSubtitles}
         subtitlesAvailable={subtitlesAvailable}
       />
-      <AppFooter />
     </div>
   );
 }

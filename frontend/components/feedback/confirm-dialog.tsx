@@ -18,8 +18,16 @@ export interface ConfirmDialogProps {
 }
 
 const TONES = {
-  danger: { bar: 'bg-[#b42318]', button: 'bg-[#b42318] hover:bg-[#8f1d13]' },
-  warning: { bar: 'bg-[#c9811a]', button: 'bg-[#0f766e] hover:bg-[#0b5a54]' },
+  danger: {
+    bar: 'bg-rose-500',
+    button:
+      'bg-rose-600 hover:bg-rose-500 text-white font-bold shadow-md shadow-rose-600/20',
+  },
+  warning: {
+    bar: 'bg-amber-500',
+    button:
+      'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold shadow-md shadow-emerald-500/20',
+  },
 };
 
 export function ConfirmDialog({
@@ -79,7 +87,7 @@ export function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1f1c]/55 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onCancel();
       }}
@@ -88,29 +96,29 @@ export function ConfirmDialog({
         aria-describedby={bodyId}
         aria-labelledby={titleId}
         aria-modal="true"
-        className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl"
+        className="w-full max-w-md overflow-hidden rounded-2xl bg-zinc-900/95 border border-zinc-800 shadow-2xl text-zinc-100 backdrop-blur-xl"
         ref={panelRef}
         role="alertdialog"
       >
         <div className={`h-1 ${style.bar}`} />
         <div className="p-5">
-          <h2 className="text-lg font-bold text-[#172321]" id={titleId}>
+          <h2 className="text-lg font-bold text-zinc-100" id={titleId}>
             {title}
           </h2>
           {subject ? (
             <p
-              className="mt-3 rounded-lg bg-[#f2f6f4] px-3 py-2 font-[family-name:var(--font-cairo)] text-sm font-semibold text-[#172321]"
+              className="mt-3 rounded-lg border border-zinc-700/60 bg-zinc-800/80 px-3 py-2 font-[family-name:var(--font-cairo)] text-sm font-semibold text-zinc-100"
               dir={subjectDir}
             >
               {subject}
             </p>
           ) : null}
-          <div className="mt-3 text-sm text-[#44534e]" id={bodyId}>
+          <div className="mt-3 text-sm text-zinc-400" id={bodyId}>
             {children}
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <button
-              className="h-9 rounded-lg border border-[#d5dcd8] bg-white px-4 text-sm font-medium text-[#263532] hover:bg-[#f6f8f7] disabled:opacity-50"
+              className="h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-4 text-sm font-medium text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
               disabled={busy}
               onClick={onCancel}
               ref={cancelRef}
@@ -119,7 +127,7 @@ export function ConfirmDialog({
               {cancelLabel}
             </button>
             <button
-              className={`h-9 rounded-lg px-4 text-sm font-semibold text-white disabled:opacity-50 ${style.button}`}
+              className={`h-9 rounded-lg px-4 text-sm disabled:opacity-50 transition-colors ${style.button}`}
               disabled={busy}
               onClick={onConfirm}
               type="button"

@@ -85,7 +85,7 @@ export function AiClipsDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1f1c]/55 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !busy) onCancel();
       }}
@@ -94,16 +94,16 @@ export function AiClipsDialog({
         aria-describedby={bodyId}
         aria-labelledby={titleId}
         aria-modal="true"
-        className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-2xl"
+        className="w-full max-w-lg overflow-hidden rounded-2xl bg-zinc-900/95 border border-zinc-800 shadow-2xl text-zinc-100 backdrop-blur-xl"
         ref={panelRef}
         role="dialog"
       >
-        <div className="h-1 bg-[#0f766e]" />
+        <div className="h-1 bg-gradient-to-r from-emerald-600 via-emerald-400 to-teal-500" />
         <div className="p-5">
-          <h2 className="text-lg font-bold text-[#172321]" id={titleId}>
+          <h2 className="text-lg font-bold text-zinc-100" id={titleId}>
             Generate clips with AI
           </h2>
-          <p className="mt-1 text-sm text-[#44534e]" id={bodyId}>
+          <p className="mt-1 text-sm text-zinc-400" id={bodyId}>
             What should the AI cut from this podcast? Clips last one to four
             minutes and never end while someone is still speaking or in the
             middle of a topic.
@@ -119,10 +119,10 @@ export function AiClipsDialog({
               return (
                 <button
                   aria-checked={active}
-                  className={`rounded-lg border px-4 py-3 text-left transition disabled:opacity-50 ${
+                  className={`rounded-xl border px-4 py-3 text-left transition disabled:opacity-50 ${
                     active
-                      ? 'border-[#0f766e] bg-[#f0f8f6] ring-1 ring-[#0f766e]'
-                      : 'border-[#d5dcd8] bg-white hover:bg-[#f6f8f7]'
+                      ? 'border-emerald-500/80 bg-emerald-500/10 ring-1 ring-emerald-500/50'
+                      : 'border-zinc-800 bg-zinc-800/50 hover:bg-zinc-800/80 hover:border-zinc-700'
                   }`}
                   disabled={busy}
                   key={option.mode}
@@ -134,18 +134,18 @@ export function AiClipsDialog({
                     <span
                       aria-hidden="true"
                       className={`flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                        active ? 'border-[#0f766e]' : 'border-[#9aa8a3]'
+                        active ? 'border-emerald-500' : 'border-zinc-600'
                       }`}
                     >
                       {active ? (
-                        <span className="h-2 w-2 rounded-full bg-[#0f766e]" />
+                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
                       ) : null}
                     </span>
-                    <span className="text-sm font-semibold text-[#172321]">
+                    <span className="text-sm font-semibold text-zinc-100">
                       {option.title}
                     </span>
                   </span>
-                  <span className="mt-1 block pl-6 text-xs text-[#5d6d68]">
+                  <span className="mt-1 block pl-6 text-xs text-zinc-400">
                     {option.description}
                   </span>
                 </button>
@@ -153,12 +153,12 @@ export function AiClipsDialog({
             })}
           </div>
 
-          <p className="mt-3 text-xs text-[#5d6d68]">
+          <p className="mt-3 text-xs text-zinc-400">
             Uses one AI run. A topic longer than four minutes is split into
             parts.
           </p>
           {existingAiClips > 0 ? (
-            <p className="mt-2 rounded-lg bg-[#fdf4e3] px-3 py-2 text-xs text-[#7a4f0c]">
+            <p className="mt-2 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-amber-300">
               This replaces your {existingAiClips} current AI clip
               {existingAiClips === 1 ? '' : 's'}. Clips you edited or created
               manually are kept.
@@ -167,7 +167,7 @@ export function AiClipsDialog({
 
           <div className="mt-5 flex justify-end gap-2">
             <button
-              className="h-9 rounded-lg border border-[#d5dcd8] bg-white px-4 text-sm font-medium text-[#263532] hover:bg-[#f6f8f7] disabled:opacity-50"
+              className="h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-4 text-sm font-medium text-zinc-200 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
               disabled={busy}
               onClick={onCancel}
               ref={cancelRef}
@@ -176,7 +176,7 @@ export function AiClipsDialog({
               Cancel
             </button>
             <button
-              className="h-9 rounded-lg bg-[#0f766e] px-4 text-sm font-semibold text-white hover:bg-[#0b5a54] disabled:opacity-50"
+              className="h-9 rounded-lg bg-emerald-500 px-4 text-sm font-bold text-zinc-950 hover:bg-emerald-400 shadow-md shadow-emerald-500/20 disabled:opacity-50 transition-colors"
               disabled={busy}
               onClick={onConfirm}
               type="button"

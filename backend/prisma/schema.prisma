@@ -10,8 +10,16 @@ datasource db {
 
 enum VideoStatus {
   UPLOADING
+  UPLOADED
+  PROCESSING
   READY
   FAILED
+  DELETING
+}
+
+enum ContentType {
+  PODCAST
+  SOLO
 }
 
 enum ClipSource {
@@ -19,29 +27,63 @@ enum ClipSource {
   AI
 }
 
-enum ProcessingJobStatus {
-  PENDING
-  RUNNING
-  COMPLETED
-  FAILED
+enum ClipStatus {
+  DRAFT
+  READY
 }
 
-enum ProcessingJobType {
-  TRANSCRIPTION
+enum VideoLayout {
+  AUTO
+  STACKED
+}
+
+enum JobType {
+  INGEST
+  TRANSCRIBE
+  SEGMENT
+  ANALYZE
   RENDER
+  CLEANUP
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  RETRYING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum AssetKind {
+  SOURCE
+  AUDIO
+  PROXY
+  POSTER
+  THUMB
+  RENDER
+  SUBTITLE_FILE
+}
+
+enum MediaAssetStatus {
+  PENDING
+  READY
+  DELETING
+  DELETED
 }
 
 model User {
-  id           String    @id @default(cuid())
-  email        String    @unique
-  passwordHash String
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  videos       Video[]
-  sessions     Session[]
-  usageRecords UsageRecord[]
-  processingJobs ProcessingJob[]
+  id               String            @id @default(cuid())
+  email            String            @unique
+  passwordHash     String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  videos           Video[]
+  sessions         Session[]
+  usageRecords     UsageRecord[]
+  processingJobs   ProcessingJob[]
   segmentationRuns SegmentationRun[]
+  mediaAssets      MediaAsset[]
 }
 
 model Session {
@@ -56,37 +98,47 @@ model Session {
 }
 
 model Video {
-  id           String      @id @default(cuid())
-  userId       String
-  title        String
-  cloudinaryId String?     @unique
-  durationSec  Float?
-  sizeBytes    BigInt?
-  status       VideoStatus @default(UPLOADING)
-  language     String      @default("ar")
-  autoClips    Boolean     @default(false)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  clips        Clip[]
-  processingJobs ProcessingJob[]
-  transcript   Transcript?
+  id               String            @id @default(cuid())
+  userId           String
+  title            String
+  contentType      ContentType       @default(SOLO)
+  durationSec      Float?
+  sizeBytes        BigInt?
+  status           VideoStatus       @default(UPLOADING)
+  failedStage      JobType?
+  language         String            @default("ar")
+  autoClips        Boolean           @default(false)
+  deletedAt        DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clips            Clip[]
+  processingJobs   ProcessingJob[]
+  transcript       Transcript?
   segmentationRuns SegmentationRun[]
+  mediaAssets      MediaAsset[]
+  reframePlan      ReframePlan?
 
   @@index([userId])
 }
 
 model Clip {
-  id        String     @id @default(cuid())
-  videoId   String
-  title     String
-  startSec  Float
-  endSec    Float
-  source    ClipSource @default(MANUAL)
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  video     Video      @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  renders   ClipRender[]
+  id           String       @id @default(cuid())
+  videoId      String
+  title        String
+  startSec     Float
+  endSec       Float
+  source       ClipSource   @default(MANUAL)
+  status       ClipStatus   @default(DRAFT)
+  layout       VideoLayout  @default(AUTO)
+  score        Float?
+  reason       String?
+  thumbnailUrl String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  video        Video        @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  renders      ClipRender[]
+  mediaAssets  MediaAsset[]
 
   @@index([videoId])
 }
@@ -107,38 +159,103 @@ model UsageRecord {
 }
 
 model ProcessingJob {
-  id          String              @id @default(cuid())
-  userId      String
-  videoId     String?
-  type        ProcessingJobType
-  status      ProcessingJobStatus @default(PENDING)
-  bullJobId   String?             @unique
-  progress    Int                 @default(0)
-  attempts    Int                 @default(0)
-  lastError   String?
-  payload     Json?
-  startedAt   DateTime?
-  completedAt DateTime?
-  failedAt    DateTime?
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  video       Video?              @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  clipRender  ClipRender?
+  id             String      @id @default(cuid())
+  userId         String
+  videoId        String?
+  type           JobType
+  status         JobStatus   @default(QUEUED)
+  idempotencyKey String?     @unique
+  bullJobId      String?     @unique
+  progress       Int         @default(0)
+  attempt        Int         @default(0)
+  maxAttempts    Int         @default(3)
+  lockedBy       String?
+  heartbeatAt    DateTime?
+  errorCode      String?
+  lastError      String?
+  payload        Json?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  failedAt       DateTime?
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video          Video?      @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  clipRender     ClipRender?
+  events         JobEvent[]
 
   @@index([userId, status])
   @@index([videoId])
   @@index([status, createdAt])
 }
 
+model JobEvent {
+  id      String        @id @default(cuid())
+  jobId   String
+  at      DateTime      @default(now())
+  level   String        @default("INFO")
+  message String
+  data    Json?
+  job     ProcessingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, at])
+}
+
+model OutboxEvent {
+  id          String    @id @default(cuid())
+  routingKey  String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+
+  @@index([publishedAt, createdAt])
+}
+
+model MediaAsset {
+  id          String           @id @default(cuid())
+  userId      String
+  videoId     String?
+  clipId      String?
+  kind        AssetKind
+  storageKey  String           @unique
+  sizeBytes   BigInt?
+  contentType String?
+  status      MediaAssetStatus @default(PENDING)
+  expiresAt   DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  video       Video?           @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  clip        Clip?            @relation(fields: [clipId], references: [id], onDelete: Cascade)
+  clipRenders ClipRender[]
+
+  @@index([userId])
+  @@index([videoId])
+  @@index([clipId])
+  @@index([status, expiresAt])
+}
+
+model ReframePlan {
+  id           String      @id @default(cuid())
+  videoId      String      @unique
+  version      Int         @default(1)
+  contentType  ContentType @default(SOLO)
+  faces        Json
+  speakerTurns Json?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  video        Video       @relation(fields: [videoId], references: [id], onDelete: Cascade)
+}
+
 model Transcript {
-  id          String              @id @default(cuid())
-  videoId     String              @unique
-  language    String
-  createdAt   DateTime            @default(now())
-  updatedAt   DateTime            @updatedAt
-  video       Video               @relation(fields: [videoId], references: [id], onDelete: Cascade)
-  segments    TranscriptSegment[]
+  id        String              @id @default(cuid())
+  videoId   String              @unique
+  language  String
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+  video     Video               @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  segments  TranscriptSegment[]
 }
 
 model TranscriptSegment {
@@ -148,6 +265,7 @@ model TranscriptSegment {
   endSec       Float
   text         String
   words        Json?
+  speaker      String?
   createdAt    DateTime   @default(now())
   transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
 
@@ -173,6 +291,7 @@ model ClipRender {
   id              String         @id @default(cuid())
   clipId          String
   processingJobId String?        @unique
+  assetId         String?
   startSec        Float
   endSec          Float
   outputUrl       String?
@@ -184,6 +303,7 @@ model ClipRender {
   updatedAt       DateTime       @updatedAt
   clip            Clip           @relation(fields: [clipId], references: [id], onDelete: Cascade)
   processingJob   ProcessingJob? @relation(fields: [processingJobId], references: [id], onDelete: Cascade)
+  asset           MediaAsset?    @relation(fields: [assetId], references: [id], onDelete: SetNull)
 
   @@index([clipId, createdAt])
 }

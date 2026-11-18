@@ -24,12 +24,16 @@ lerna-debug.log*
 !.vscode/launch.json
 !.vscode/extensions.json
 .env
+.env.*
+!.env.example
 .env.development.local
 .env.test.local
 .env.production.local
 .env.local
 .temp
 .tmp
+storage
+/storage
 pids
 *.pid
 *.seed

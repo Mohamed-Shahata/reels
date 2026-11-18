@@ -7,11 +7,11 @@ import { ConfigService } from '@nestjs/config';
 import { ClipsService } from '../../../src/clips/clips.service';
 import type { Env } from '../../../src/config/env.schema';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
-import type { StorageService } from '../../../src/storage/storage.service';
-
 function createService(
   prisma: Record<string, unknown>,
-  storage: Partial<StorageService> = {},
+  mediaAssets?: any,
+  jobsService?: any,
+  ffmpegRender?: any,
 ): ClipsService {
   const values: Pick<Env, 'CLIP_MIN_DURATION_SEC' | 'CLIP_MAX_DURATION_SEC'> = {
     CLIP_MIN_DURATION_SEC: 5,
@@ -25,7 +25,9 @@ function createService(
       ...prisma,
     } as unknown as PrismaService,
     config as ConfigService<Env, true>,
-    storage as StorageService,
+    jobsService,
+    mediaAssets,
+    ffmpegRender,
   );
 }
 
@@ -55,7 +57,11 @@ describe('ClipsService.create', () => {
     expect(result).toMatchObject({ id: 'clip-1', startSec: 10, endSec: 30 });
     expect(video.findFirst).toHaveBeenCalledWith({
       where: { id: 'video-1', userId: 'user-1' },
-      select: { id: true, status: true, durationSec: true },
+      select: {
+        id: true,
+        status: true,
+        durationSec: true,
+      },
     });
     expect(clip.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -151,7 +157,6 @@ describe('ClipsService.create', () => {
         get: (key: 'CLIP_MIN_DURATION_SEC' | 'CLIP_MAX_DURATION_SEC') =>
           key === 'CLIP_MIN_DURATION_SEC' ? 5 : 180,
       } as ConfigService<Env, true>,
-      {} as StorageService,
     );
 
     await expect(
@@ -228,7 +233,6 @@ describe('ClipsService.create', () => {
         get: (key: 'CLIP_MIN_DURATION_SEC' | 'CLIP_MAX_DURATION_SEC') =>
           key === 'CLIP_MIN_DURATION_SEC' ? 5 : 180,
       } as ConfigService<Env, true>,
-      {} as StorageService,
     );
 
     await service.createAiSuggestions(
@@ -318,88 +322,50 @@ describe('ClipsService ownership and updates', () => {
         id: 'clip-1',
         startSec: 10,
         endSec: 30,
-        video: { cloudinaryId: 'podcast-reels/uploads/user-1/video-1' },
+        video: { id: 'video-1' },
       }),
     };
-    const storage = {
-      getClipPlaybackUrl: jest.fn().mockReturnValue('https://preview.example'),
-      getClipDownloadUrl: jest.fn().mockReturnValue('https://download.example'),
+    const mediaAsset = {
+      findFirst: jest.fn().mockImplementation(({ where }) => {
+        if (where.clipId === 'clip-1') {
+          return Promise.resolve({ storageKey: 'users/1/renders/r1.mp4' });
+        }
+        return Promise.resolve({ storageKey: 'users/1/proxies/p1.mp4' });
+      }),
     };
-    const service = createService({ clip }, storage);
+    const mediaAssets = {
+      signedUrl: jest
+        .fn()
+        .mockResolvedValue('https://signed.example/video.mp4'),
+    };
+    const service = createService({ clip, mediaAsset }, mediaAssets);
 
     await expect(service.getPlaybackUrl('user-1', 'clip-1')).resolves.toBe(
-      'https://preview.example',
+      'https://signed.example/video.mp4',
     );
     await expect(service.getDownloadUrl('user-1', 'clip-1')).resolves.toBe(
-      'https://download.example',
+      'https://signed.example/video.mp4',
     );
-    expect(storage.getClipPlaybackUrl).toHaveBeenCalledWith(
-      'podcast-reels/uploads/user-1/video-1',
-      10,
-      30,
-      {},
+    expect(mediaAssets.signedUrl).toHaveBeenCalledWith(
+      'users/1/proxies/p1.mp4',
+      3600,
     );
-    expect(storage.getClipDownloadUrl).toHaveBeenCalledWith(
-      'podcast-reels/uploads/user-1/video-1',
-      10,
-      30,
-      'clip-clip-1',
-      {},
+    expect(mediaAssets.signedUrl).toHaveBeenCalledWith(
+      'users/1/renders/r1.mp4',
+      300,
     );
   });
 
-  it('requests reframed playback and a 9x16 download filename when reframe is set', async () => {
-    const clip = {
-      findFirst: jest.fn().mockResolvedValue({
-        id: 'clip-1',
-        startSec: 10,
-        endSec: 30,
-        video: { cloudinaryId: 'podcast-reels/uploads/user-1/video-1' },
-      }),
-    };
-    const storage = {
-      getClipPlaybackUrl: jest.fn().mockReturnValue('https://reel-preview'),
-      getClipDownloadUrl: jest.fn().mockReturnValue('https://reel-download'),
-    };
-    const service = createService({ clip }, storage);
-
-    await expect(
-      service.getPlaybackUrl('user-1', 'clip-1', { reframe: true }),
-    ).resolves.toBe('https://reel-preview');
-    await expect(
-      service.getDownloadUrl('user-1', 'clip-1', { reframe: true }),
-    ).resolves.toBe('https://reel-download');
-    expect(storage.getClipPlaybackUrl).toHaveBeenCalledWith(
-      'podcast-reels/uploads/user-1/video-1',
-      10,
-      30,
-      { reframe: true },
-    );
-    expect(storage.getClipDownloadUrl).toHaveBeenCalledWith(
-      'podcast-reels/uploads/user-1/video-1',
-      10,
-      30,
-      'clip-clip-1-9x16',
-      { reframe: true },
-    );
-  });
-
-  it('never builds a reframed URL for a clip the user does not own', async () => {
+  it('throws NotFoundException when user does not own clip', async () => {
     const clip = { findFirst: jest.fn().mockResolvedValue(null) };
-    const storage = {
-      getClipPlaybackUrl: jest.fn(),
-      getClipDownloadUrl: jest.fn(),
-    };
-    const service = createService({ clip }, storage);
+    const service = createService({ clip });
 
     await expect(
-      service.getPlaybackUrl('user-2', 'clip-1', { reframe: true }),
+      service.getPlaybackUrl('user-2', 'clip-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
     await expect(
-      service.getDownloadUrl('user-2', 'clip-1', { reframe: true }),
+      service.getDownloadUrl('user-2', 'clip-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
-    expect(storage.getClipPlaybackUrl).not.toHaveBeenCalled();
-    expect(storage.getClipDownloadUrl).not.toHaveBeenCalled();
   });
 
   it('revalidates the full range when a clip is updated', async () => {
@@ -435,6 +401,43 @@ describe('ClipsService ownership and updates', () => {
     );
   });
 
+  it('updates clip layout to STACKED', async () => {
+    const clip = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'clip-1',
+        title: 'Original',
+        startSec: 10,
+        endSec: 30,
+        video: readyVideo,
+      }),
+      update: jest.fn().mockResolvedValue({
+        id: 'clip-1',
+        videoId: 'video-1',
+        title: 'Original',
+        startSec: 10,
+        endSec: 30,
+        layout: 'STACKED',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }),
+    };
+
+    await expect(
+      createService({ clip }).update('user-1', 'clip-1', {
+        layout: 'STACKED',
+      }),
+    ).resolves.toMatchObject({ id: 'clip-1', layout: 'STACKED' });
+    expect(clip.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'clip-1' },
+        data: expect.objectContaining({
+          layout: 'STACKED',
+          source: 'MANUAL',
+        }),
+      }),
+    );
+  });
+
   it('does not update or delete a clip owned by another user', async () => {
     const clip = {
       findFirst: jest.fn().mockResolvedValue(null),
@@ -451,5 +454,53 @@ describe('ClipsService ownership and updates', () => {
     );
     expect(clip.update).not.toHaveBeenCalled();
     expect(clip.delete).not.toHaveBeenCalled();
+  });
+});
+
+describe('ClipsService thumbnail pipeline', () => {
+  it('redirects to signedUrl when MediaAsset THUMB exists', async () => {
+    const mediaAsset = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'thumb-asset-1',
+        kind: 'THUMB',
+        status: 'READY',
+      }),
+    };
+    const mockMediaAssets: any = {
+      signedUrl: jest
+        .fn()
+        .mockResolvedValue('https://s3.example.com/signed-thumb.jpg'),
+    };
+    const res = { redirect: jest.fn() };
+
+    const service = createService({ mediaAsset }, mockMediaAssets);
+
+    await service.serveThumbnail(
+      'clip-s3-1',
+      res as unknown as import('express').Response,
+    );
+
+    expect(mockMediaAssets.signedUrl).toHaveBeenCalledWith(
+      'thumb-asset-1',
+      300,
+    );
+    expect(res.redirect).toHaveBeenCalledWith(
+      302,
+      'https://s3.example.com/signed-thumb.jpg',
+    );
+  });
+
+  it('throws NotFoundException if clip thumbnail was not found', async () => {
+    const mediaAsset = {
+      findFirst: jest.fn().mockResolvedValue(null),
+    };
+    const res = { redirect: jest.fn() };
+
+    await expect(
+      createService({ mediaAsset }, { signedUrl: jest.fn() }).serveThumbnail(
+        'missing-clip',
+        res as unknown as import('express').Response,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

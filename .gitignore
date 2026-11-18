@@ -4,3 +4,17 @@ node_modules
 .vscode/*
 !.vscode/settings.json
 !.vscode/extensions.json
+
+# Generated / temporary files
+.agents/
+.husky/_/
+*.tsbuildinfo
+
+.env
+.env.*
+.env*.local
+*.local
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+

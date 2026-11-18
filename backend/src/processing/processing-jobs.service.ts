@@ -5,17 +5,50 @@ import {
 } from '@nestjs/common';
 import type {
   ProcessingJob,
-  ProcessingJobStatus,
-  ProcessingJobType,
+  JobStatus,
+  JobType,
   Prisma,
 } from '../generated/prisma/client';
 import { describeError } from '../common/errors/describe-error';
 import { PrismaService } from '../prisma/prisma.service';
-import { InjectProcessingQueue } from './processing-queue.decorator';
-import {
-  JOB_STOPPED_MESSAGE,
-  type ProcessingQueueClient,
-} from './processing.constants';
+
+export type ProcessingJobStatus = JobStatus;
+export type ProcessingJobType = JobType;
+
+export const DEFAULT_JOB_MAX_ATTEMPTS: Record<JobType, number> = {
+  INGEST: 3,
+  TRANSCRIBE: 5,
+  SEGMENT: 3,
+  ANALYZE: 3,
+  RENDER: 3,
+  CLEANUP: 10,
+};
+
+export function jobTypeToRoutingKey(type: JobType): string {
+  switch (type) {
+    case 'INGEST':
+      return 'ingest';
+    case 'TRANSCRIBE':
+      return 'transcribe';
+    case 'SEGMENT':
+      return 'segment';
+    case 'ANALYZE':
+      return 'analyze';
+    case 'RENDER':
+      return 'render';
+    case 'CLEANUP':
+      return 'cleanup';
+  }
+}
+
+export interface EnqueueJobInput {
+  userId: string;
+  videoId?: string;
+  type: JobType;
+  payload?: Prisma.InputJsonValue;
+  idempotencyKey?: string;
+  maxAttempts?: number;
+}
 
 export interface CreateProcessingJobInput {
   userId: string;
@@ -26,32 +59,57 @@ export interface CreateProcessingJobInput {
 
 @Injectable()
 export class ProcessingJobsService {
-  constructor(
-    private readonly prisma: PrismaService,
-    @InjectProcessingQueue()
-    private readonly queue: ProcessingQueueClient,
-  ) {}
+  constructor(private readonly prisma: PrismaService) {}
 
-  async createJob(input: CreateProcessingJobInput): Promise<ProcessingJob> {
-    const job = await this.prisma.processingJob.create({
+  async enqueue(
+    tx: Prisma.TransactionClient,
+    input: EnqueueJobInput,
+  ): Promise<ProcessingJob> {
+    const idempotencyKey =
+      input.idempotencyKey ??
+      `${input.videoId ?? input.userId}:${input.type}:${Date.now()}`;
+    const maxAttempts =
+      input.maxAttempts ?? DEFAULT_JOB_MAX_ATTEMPTS[input.type] ?? 3;
+
+    const job = await tx.processingJob.create({
       data: {
         userId: input.userId,
         videoId: input.videoId,
         type: input.type,
-        status: 'PENDING',
+        status: 'QUEUED',
+        idempotencyKey,
+        maxAttempts,
         payload: input.payload,
-        bullJobId: undefined,
       },
     });
 
-    await this.queue.enqueue({
+    const routingKey = jobTypeToRoutingKey(input.type);
+    const outboxPayload = {
       processingJobId: job.id,
+      videoId: job.videoId,
+      userId: job.userId,
       type: job.type,
+      payload: input.payload,
+    };
+
+    await tx.outboxEvent.create({
+      data: {
+        routingKey,
+        payload: outboxPayload,
+      },
     });
 
-    return this.prisma.processingJob.update({
-      where: { id: job.id },
-      data: { bullJobId: job.id },
+    return job;
+  }
+
+  async createJob(input: CreateProcessingJobInput): Promise<ProcessingJob> {
+    return this.prisma.$transaction(async (tx) => {
+      return this.enqueue(tx, {
+        userId: input.userId,
+        videoId: input.videoId,
+        type: input.type,
+        payload: input.payload,
+      });
     });
   }
 
@@ -67,7 +125,7 @@ export class ProcessingJobsService {
     return this.updateStatus(id, 'RUNNING', {
       startedAt: new Date(),
       progress: 0,
-      attempts: { increment: 1 },
+      attempt: { increment: 1 },
     });
   }
 
@@ -98,77 +156,97 @@ export class ProcessingJobsService {
     });
   }
 
-  /**
-   * Stops a job that is waiting or running. It is stored as FAILED with
-   * JOB_STOPPED_MESSAGE, so the worker sees it on its next check and the user
-   * can resume it with the normal retry.
-   */
-  async stopJob(id: string): Promise<ProcessingJob> {
+  async cancelJob(id: string, userId?: string): Promise<ProcessingJob> {
     const job = await this.getById(id);
-    if (job.status !== 'PENDING' && job.status !== 'RUNNING') {
-      throw new ConflictException('Only a job in progress can be stopped');
+    if (userId && job.userId !== userId) {
+      throw new NotFoundException('Processing job not found');
     }
 
-    const stopped = await this.updateStatus(id, 'FAILED', {
-      failedAt: new Date(),
-      lastError: JOB_STOPPED_MESSAGE,
-    });
-    try {
-      await this.queue.remove?.(id);
-    } catch {
-      // The worker skips a stopped job anyway.
+    if (
+      job.status !== 'QUEUED' &&
+      job.status !== 'RUNNING' &&
+      job.status !== 'RETRYING'
+    ) {
+      throw new ConflictException('Only a job in progress can be cancelled');
     }
-    return stopped;
+
+    const cancelled = await this.updateStatus(id, 'CANCELLED', {
+      failedAt: new Date(),
+      lastError: 'Cancelled by the user',
+      errorCode: 'CANCELLED_BY_USER',
+    });
+
+    try {
+      await this.prisma.jobEvent.create({
+        data: {
+          jobId: id,
+          level: 'WARN',
+          message: 'Job was cancelled by the user',
+        },
+      });
+    } catch {
+      // Ignored
+    }
+
+    return cancelled;
   }
 
-  async retryJob(id: string): Promise<ProcessingJob> {
+  async retryJob(id: string, userId?: string): Promise<ProcessingJob> {
     const job = await this.getById(id);
+    if (userId && job.userId !== userId) {
+      throw new NotFoundException('Processing job not found');
+    }
+
     if (job.status !== 'FAILED') {
       throw new ConflictException('Only failed jobs can be retried');
     }
 
-    const reset = await this.updateStatus(id, 'PENDING', {
-      progress: 0,
-      lastError: null,
-      startedAt: null,
-      completedAt: null,
-      failedAt: null,
-    });
-    await this.queue.ensureQueued({ processingJobId: id, type: job.type });
-    return reset;
-  }
+    const routingKey = jobTypeToRoutingKey(job.type);
 
-  async recoverPersistedJobs(): Promise<number> {
-    const jobs = await this.prisma.processingJob.findMany({
-      where: { status: { in: ['PENDING', 'RUNNING'] } },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    let recovered = 0;
-    for (const job of jobs) {
-      if (job.status === 'RUNNING') {
-        await this.prisma.processingJob.update({
-          where: { id: job.id },
-          data: {
-            status: 'PENDING',
-            startedAt: null,
-          },
-        });
-      }
-
-      await this.queue.ensureQueued({
-        processingJobId: job.id,
-        type: job.type,
+    return this.prisma.$transaction(async (tx) => {
+      const reset = await tx.processingJob.update({
+        where: { id },
+        data: {
+          status: 'QUEUED',
+          progress: 0,
+          errorCode: null,
+          lastError: null,
+          startedAt: null,
+          completedAt: null,
+          failedAt: null,
+          lockedBy: null,
+          heartbeatAt: null,
+        },
       });
-      recovered += 1;
-    }
 
-    return recovered;
+      await tx.outboxEvent.create({
+        data: {
+          routingKey,
+          payload: {
+            processingJobId: job.id,
+            videoId: job.videoId,
+            userId: job.userId,
+            type: job.type,
+            payload: job.payload,
+          },
+        },
+      });
+
+      await tx.jobEvent.create({
+        data: {
+          jobId: id,
+          level: 'INFO',
+          message: `Job retried by user for stage ${job.type}`,
+        },
+      });
+
+      return reset;
+    });
   }
 
   private async updateStatus(
     id: string,
-    status: ProcessingJobStatus,
+    status: JobStatus,
     data: Prisma.ProcessingJobUpdateInput,
   ): Promise<ProcessingJob> {
     try {
@@ -181,3 +259,5 @@ export class ProcessingJobsService {
     }
   }
 }
+
+export { ProcessingJobsService as JobsService };

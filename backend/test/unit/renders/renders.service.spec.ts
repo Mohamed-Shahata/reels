@@ -1,7 +1,7 @@
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { PrismaService } from '../../../src/prisma/prisma.service';
 import type { ProcessingJobsService } from '../../../src/processing/processing-jobs.service';
-import type { StorageService } from '../../../src/storage/storage.service';
+import type { MediaAssetService } from '../../../src/storage/media-asset.service';
 import type { SubtitlesService } from '../../../src/subtitles/subtitles.service';
 import { RendersService } from '../../../src/renders/renders.service';
 
@@ -9,7 +9,7 @@ const readyClip = {
   id: 'clip-1',
   startSec: 10,
   endSec: 30,
-  video: { id: 'video-1', status: 'READY', cloudinaryId: 'cloud/video-1' },
+  video: { id: 'video-1', status: 'READY' },
 };
 
 function renderRecord(overrides: Record<string, unknown> = {}) {
@@ -36,13 +36,13 @@ function createService(
   prisma: Record<string, unknown>,
   jobs: Record<string, jest.Mock> = {},
   subtitles: Record<string, jest.Mock> = {},
-  storage: Record<string, jest.Mock> = {},
+  mediaAssets: Record<string, jest.Mock> = {},
 ) {
   return new RendersService(
     prisma as unknown as PrismaService,
     jobs as unknown as ProcessingJobsService,
     subtitles as unknown as SubtitlesService,
-    storage as unknown as StorageService,
+    mediaAssets as unknown as MediaAssetService,
   );
 }
 
@@ -163,7 +163,7 @@ describe('RendersService', () => {
             startSec: 10,
             endSec: 30,
             processingJob: {
-              is: { status: { in: ['PENDING', 'RUNNING', 'COMPLETED'] } },
+              is: { status: { in: ['QUEUED', 'RUNNING', 'COMPLETED'] } },
             },
           }) as unknown,
         }),
@@ -234,7 +234,6 @@ describe('RendersService', () => {
     const readyVideo = {
       id: 'video-1',
       status: 'READY',
-      cloudinaryId: 'cloud/video-1',
       clips: [
         { id: 'clip-1', startSec: 10, endSec: 30 },
         { id: 'clip-2', startSec: 60, endSec: 90 },
@@ -570,45 +569,24 @@ describe('RendersService', () => {
     });
   });
   describe('deleteSubtitledRenders', () => {
-    const subtitledRender = {
-      id: 'render-1',
-      startSec: 10,
-      endSec: 30,
-      subtitleStyle: {
-        fontFamily: 'Cairo',
-        fontSizePx: 34,
-        bold: true,
-        textColor: '#ffffff',
-        backgroundColor: '#000000',
-        backgroundOpacity: 0.6,
-        position: 'MIDDLE',
-        displayMode: 'WORD',
-      },
-      subtitleCues: [{ index: 1, startSec: 1, endSec: 2, text: 'أصلاً' }],
-      clip: { video: { cloudinaryId: 'cloud/video-1' } },
-    };
-
-    it('removes finished subtitled renders and their Cloudinary copies', async () => {
+    it('removes finished subtitled renders and marks media assets deleting', async () => {
       const prisma = {
         video: { findFirst: jest.fn().mockResolvedValue({ id: 'video-1' }) },
         clipRender: {
-          findMany: jest.fn().mockResolvedValue([subtitledRender]),
+          findMany: jest
+            .fn()
+            .mockResolvedValue([{ id: 'render-1', assetId: 'asset-1' }]),
           deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
         },
       };
-      const deleteClipReelRender = jest.fn().mockResolvedValue(undefined);
-      const service = createService(prisma, {}, {}, { deleteClipReelRender });
+      const markDeleting = jest.fn().mockResolvedValue(undefined);
+      const service = createService(prisma, {}, {}, { markDeleting });
 
       await expect(
         service.deleteSubtitledRenders('user-1', { videoId: 'video-1' }),
       ).resolves.toEqual({ deleted: 1 });
 
-      expect(deleteClipReelRender).toHaveBeenCalledWith(
-        'cloud/video-1',
-        10,
-        30,
-        expect.objectContaining({ style: subtitledRender.subtitleStyle }),
-      );
+      expect(markDeleting).toHaveBeenCalledWith(prisma, 'asset-1');
       expect(prisma.clipRender.deleteMany).toHaveBeenCalledWith({
         where: { id: { in: ['render-1'] } },
       });
@@ -623,6 +601,100 @@ describe('RendersService', () => {
           videoId: 'video-1',
         }),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('getDownloadUrl', () => {
+    it('returns signed download URL from MediaAsset when assetId is present', async () => {
+      const prisma = {
+        clipRender: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'render-1',
+            assetId: 'asset-1',
+            outputUrl: null,
+            processingJob: { status: 'COMPLETED' },
+            clip: { video: {} },
+          }),
+        },
+      };
+      const mediaAssets = {
+        signedUrl: jest.fn().mockResolvedValue('https://s3.download/reel.mp4'),
+      };
+      const service = new RendersService(
+        prisma as any,
+        {} as any,
+        {} as any,
+        mediaAssets as any,
+      );
+
+      const url = await service.getDownloadUrl('user-1', 'render-1');
+      expect(url).toBe('https://s3.download/reel.mp4');
+      expect(mediaAssets.signedUrl).toHaveBeenCalledWith('asset-1', 300);
+    });
+
+    it('returns outputUrl when present', async () => {
+      const prisma = {
+        clipRender: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'render-1',
+            assetId: null,
+            outputUrl: 'https://cdn.example.com/render-1.mp4',
+            processingJob: { status: 'COMPLETED' },
+            clip: { video: {} },
+          }),
+        },
+      };
+      const service = new RendersService(
+        prisma as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      const url = await service.getDownloadUrl('user-1', 'render-1');
+      expect(url).toBe('https://cdn.example.com/render-1.mp4');
+    });
+
+    it('throws NotFoundException when render does not exist', async () => {
+      const prisma = {
+        clipRender: {
+          findFirst: jest.fn().mockResolvedValue(null),
+        },
+      };
+      const service = new RendersService(
+        prisma as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      await expect(
+        service.getDownloadUrl('user-1', 'nonexistent'),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws ConflictException when render is still processing and has no asset', async () => {
+      const prisma = {
+        clipRender: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: 'render-1',
+            assetId: null,
+            outputUrl: null,
+            processingJob: { status: 'RUNNING' },
+            clip: { video: {} },
+          }),
+        },
+      };
+      const service = new RendersService(
+        prisma as any,
+        {} as any,
+        {} as any,
+        {} as any,
+      );
+
+      await expect(
+        service.getDownloadUrl('user-1', 'render-1'),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 });

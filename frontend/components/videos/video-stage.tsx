@@ -2,8 +2,14 @@
 
 import type { SubtitleStyle } from '@/lib/api';
 import {
+  getPreviewFreeStyle,
   getPreviewPositionStyle,
   getPreviewTextStyle,
+  getSubtitlePoint,
+  pointPatch,
+  snapPoint,
+  type SubtitlePoint,
+  type SnapResult,
 } from '@/lib/subtitle-style';
 import { formatClock } from '@/lib/trimmer';
 import { useRef, useState, type RefObject } from 'react';
@@ -114,6 +120,8 @@ interface VideoStageProps {
   /** Whether captions are drawn on the stage. Off by default. */
   subtitlesOn?: boolean;
   onSubtitlesToggle?: (() => void) | null;
+  /** Called with a style patch when the caption is dragged (9:16 Reel only). */
+  onSubtitleMove?: ((patch: Partial<SubtitleStyle>) => void) | null;
   subtitlesDisabled?: boolean;
   /** 1-based number of the AI clip under the playhead, 0 when none. */
   liveHook: number;
@@ -149,6 +157,7 @@ export function VideoStage({
   subtitleStyle = null,
   subtitlesOn = false,
   onSubtitlesToggle = null,
+  onSubtitleMove = null,
   subtitlesDisabled = false,
   liveHook,
   onTimeUpdate,
@@ -172,6 +181,28 @@ export function VideoStage({
   const [mediaDuration, setMediaDuration] = useState(0);
   const [buffering, setBuffering] = useState(false);
   const [failed, setFailed] = useState(false);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<SnapResult | null>(null);
+
+  function pointFromEvent(event: React.PointerEvent): SubtitlePoint | null {
+    const rect = frameRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width || !rect.height) return null;
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * 100,
+      y: ((event.clientY - rect.top) / rect.height) * 100,
+    };
+  }
+
+  function moveDrag(event: React.PointerEvent) {
+    if (!drag) return;
+    const raw = pointFromEvent(event);
+    if (raw) setDrag(snapPoint(raw));
+  }
+
+  function endDrag() {
+    if (drag) onSubtitleMove?.(pointPatch(drag.point));
+    setDrag(null);
+  }
 
   const vertical = frame === 'vertical';
   const windowed = windowStart !== null && windowEnd !== null;
@@ -304,6 +335,7 @@ export function VideoStage({
           className={`relative overflow-hidden bg-black ${
             vertical ? 'aspect-[9/16] h-full' : 'h-full w-full'
           }`}
+          ref={frameRef}
         >
           {sourceUrl ? (
             <video
@@ -395,7 +427,56 @@ export function VideoStage({
               Live hook #{liveHook}
             </span>
           ) : null}
-          {caption && subtitleStyle ? (
+          {caption && subtitleStyle && vertical && onSubtitleMove ? (
+            <div
+              className="pointer-events-none absolute inset-0"
+              style={{ containerType: 'inline-size' }}
+            >
+              {drag ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className={`absolute inset-y-0 left-1/2 w-px ${drag.centeredX ? 'bg-[#2dd4bf]' : 'bg-white/30'}`}
+                  />
+                  <span
+                    aria-hidden="true"
+                    className={`absolute inset-x-0 top-1/2 h-px ${drag.centeredY ? 'bg-[#2dd4bf]' : 'bg-white/30'}`}
+                  />
+                </>
+              ) : null}
+              <p
+                aria-label="Drag to move the subtitle"
+                className="pointer-events-auto absolute max-w-[88%] cursor-grab touch-none select-none px-[3%] py-[1%] text-center leading-snug active:cursor-grabbing"
+                dir="auto"
+                onPointerCancel={endDrag}
+                onPointerDown={(event) => {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  setDrag(snapPoint(getSubtitlePoint(subtitleStyle)));
+                }}
+                onPointerMove={moveDrag}
+                onPointerUp={endDrag}
+                style={{
+                  ...getPreviewTextStyle(subtitleStyle),
+                  ...getPreviewFreeStyle(
+                    drag ? drag.point : getSubtitlePoint(subtitleStyle),
+                  ),
+                }}
+              >
+                {caption}
+              </p>
+              {drag ? (
+                <span className="absolute inset-x-0 bottom-2 mx-auto w-fit rounded bg-black/60 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  {drag.centeredX && drag.centeredY
+                    ? 'متوسّط أفقياً ورأسياً ✓'
+                    : drag.centeredX
+                      ? 'متوسّط أفقياً ✓'
+                      : drag.centeredY
+                        ? 'متوسّط رأسياً ✓'
+                        : 'اسحب للتوسيط'}
+                </span>
+              ) : null}
+            </div>
+          ) : caption && subtitleStyle ? (
             <div
               className="pointer-events-none absolute inset-x-0 flex justify-center px-[6%]"
               style={{

@@ -1,23 +1,32 @@
-# Podcast Reels
+# ReelCast
 
-Upload a long podcast video and cut it into short reels. See [docs/PROJECT.md](docs/PROJECT.md) for the full product description, architecture, conventions and the phased task list.
+Upload long podcast and solo talk videos and cut them into short vertical 9:16 reels with Whisper transcription, automated AI topic segmentation, auto-reframing, and burned-in subtitles.
 
-## Structure
+See [docs/PROJECT.md](docs/PROJECT.md) for the target architecture specification and [docs/reels-plan.md](docs/reels-plan.md) for the phased master plan.
 
-- `backend`: NestJS API (Prisma, PostgreSQL, Cloudinary)
-- `frontend`: Next.js web app
-- `docs`: project documentation
+## Architecture
 
-## Quick start
+- `backend`: NestJS API and background worker pipeline (Prisma, PostgreSQL, RabbitMQ, S3/MinIO storage, FFmpeg)
+- `frontend`: Next.js (App Router, Tailwind CSS, i18n support)
+- `docs`: Technical documentation and master plan
+
+## Quick Start
 
 ```bash
+# 1. Install dependencies
 npm run install:all
-npm run db:up
+
+# 2. Setup environment variables
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
+
+# 3. Start infrastructure (PostgreSQL, Redis/RabbitMQ)
+npm run db:up
+
+# 4. Run database migrations
 npm --prefix backend run db:migrate
+
+# 5. Start development servers
 npm run dev:backend
 npm run dev:frontend
 ```
-
-Fill in the Cloudinary values in `backend/.env` before starting the API.

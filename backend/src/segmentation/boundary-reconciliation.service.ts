@@ -5,6 +5,8 @@ export interface TopicSegmentCandidate {
   startSec: number;
   endSec: number;
   summary: string;
+  score?: number;
+  reason?: string;
 }
 
 export type ReconciledTopicSegment = TopicSegmentCandidate;

@@ -16,6 +16,27 @@ export const envSchema = z
       (value) => /^redis(s)?:\/\//.test(value),
       'must be a Redis connection string',
     ),
+    RABBITMQ_URL: nonEmpty
+      .refine(
+        (value) => /^amqp(s)?:\/\//.test(value),
+        'must be an AMQP connection string',
+      )
+      .default('amqp://guest:guest@localhost:5672'),
+    S3_ENDPOINT: z.string().optional(),
+    S3_REGION: nonEmpty.default('us-east-1'),
+    S3_BUCKET: nonEmpty.default('reels-media'),
+    S3_ACCESS_KEY_ID: nonEmpty.default('minioadmin'),
+    S3_SECRET_ACCESS_KEY: nonEmpty.default('minioadmin'),
+    S3_FORCE_PATH_STYLE: z
+      .preprocess((val) => {
+        if (val === undefined || val === '') return true;
+        if (typeof val === 'string') {
+          return val.toLowerCase() !== 'false' && val !== '0';
+        }
+        return Boolean(val);
+      }, z.boolean())
+      .default(true),
+    DOWNLOAD_URL_TTL_SEC: z.coerce.number().int().positive().default(300),
     CORS_ORIGIN: nonEmpty.transform((value) =>
       value
         .split(',')
@@ -28,12 +49,9 @@ export const envSchema = z
     REFRESH_TOKEN_TTL_SEC: z.coerce.number().int().min(3600).default(2592000),
     AUTH_RATE_LIMIT_TTL_SEC: z.coerce.number().int().min(1).default(60),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
-    CLOUDINARY_CLOUD_NAME: nonEmpty,
-    CLOUDINARY_API_KEY: nonEmpty,
-    CLOUDINARY_API_SECRET: nonEmpty,
-    CLOUDINARY_UPLOAD_PRESET: nonEmpty.optional(),
-    CLOUDINARY_UPLOAD_FOLDER: nonEmpty.default('podcast-reels'),
     GROQ_API_KEY: nonEmpty,
+    TRANSCRIBE_CONCURRENCY: z.coerce.number().int().min(1).max(8).default(2),
+    ANALYZER_URL: z.string().url().default('http://localhost:8001'),
     GROQ_SEGMENTATION_MODEL: nonEmpty.default('openai/gpt-oss-20b'),
     SEGMENTATION_WINDOW_MAX_CHARS: z.coerce
       .number()
@@ -53,19 +71,10 @@ export const envSchema = z
       .min(1)
       .default(3),
     SEGMENTATION_MONTHLY_RUN_LIMIT: z.coerce.number().int().min(1).default(20),
-    RENDER_POLL_INTERVAL_MS: z.coerce.number().int().min(1).default(3000),
-    RENDER_TIMEOUT_MS: z.coerce.number().int().min(1).default(300000),
-    // LAYERS draws every subtitle as its own Cloudinary text layer (letters are
-    // never clipped). SRT uploads one subtitle file instead; use it only if a
-    // very long clip is rejected by Cloudinary for being too large.
-    SUBTITLE_BURN_MODE: z.enum(['LAYERS', 'SRT']).default('LAYERS'),
-    // LAYERS mode only. ALPHA: one layer per cue, the box opacity is the alpha
-    // of its colour (short URL, but Cloudinary may draw a solid box). LAYERED:
-    // box and text are separate layers so the opacity is honoured, at twice
-    // the layers; if a reel then fails to play, go back to ALPHA.
-    SUBTITLE_BOX_MODE: z.enum(['ALPHA', 'LAYERED']).default('ALPHA'),
+    WORKER_CONCURRENCY_RENDER: z.coerce.number().int().min(1).default(1),
+    RENDER_RETENTION_DAYS: z.coerce.number().int().min(1).default(14),
     VIDEO_ALLOWED_FORMATS: nonEmpty
-      .default('mp4,mov,webm')
+      .default('mp4,mov,webm,mkv')
       .transform((value) =>
         value
           .split(',')
@@ -87,8 +96,8 @@ export const envSchema = z
       .default(4 * 60 * 60),
     CLIP_MIN_DURATION_SEC: z.coerce.number().positive().default(5),
     CLIP_MAX_DURATION_SEC: z.coerce.number().positive().default(240),
-    AI_CLIP_MIN_DURATION_SEC: z.coerce.number().positive().default(60),
-    AI_CLIP_MAX_DURATION_SEC: z.coerce.number().positive().default(240),
+    AI_CLIP_MIN_DURATION_SEC: z.coerce.number().positive().default(20),
+    AI_CLIP_MAX_DURATION_SEC: z.coerce.number().positive().default(90),
     STALE_UPLOAD_THRESHOLD_SEC: z.coerce.number().int().min(60).default(86400),
     STALE_UPLOAD_CLEANUP_INTERVAL_SEC: z.coerce
       .number()

@@ -7,7 +7,9 @@ import {
   type Usage,
   type UploadConstraints,
 } from '@/lib/api';
-import { uploadVideoInChunks } from '@/lib/chunked-upload';
+import {
+  uploadVideoInChunks,
+} from '@/lib/chunked-upload';
 import {
   SPOKEN_LANGUAGES,
   estimateRemaining,
@@ -31,7 +33,6 @@ import {
 import { readVideoPreview, type VideoPreview } from '@/lib/video-preview';
 import { useAuth } from '@/components/auth/auth-provider';
 import { PageLoading } from '@/components/common/page-loading';
-import { AppFooter } from '@/components/layout/app-footer';
 import { AppHeader } from '@/components/layout/app-header';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -217,12 +218,15 @@ export function UploadVideoForm() {
         const created = await api.createVideo(title.trim(), {
           language,
           autoClips,
+          filename: file.name,
+          contentTypeHeader: file.type || 'video/mp4',
+          sizeBytes: file.size,
         });
         activeUpload = {
           fileFingerprint: getFileFingerprint(file),
           nextByte: 0,
           title: title.trim(),
-          uploadId: crypto.randomUUID(),
+          uploadId: created.upload.uploadId ?? crypto.randomUUID(),
           videoId: created.video.id,
         };
         upload = created.upload;
@@ -242,7 +246,9 @@ export function UploadVideoForm() {
         setState('confirming');
         await confirmUpload(
           uploadState.videoId,
-          uploadState.cloudinaryPublicId,
+          uploadState.cloudinaryPublicId
+            ? { publicId: uploadState.cloudinaryPublicId }
+            : { uploadId: uploadState.uploadId },
           controller.signal,
         );
         clearPendingUpload(file);
@@ -252,7 +258,10 @@ export function UploadVideoForm() {
       }
 
       setState('uploading');
-      const uploadedAsset = await uploadVideoInChunks(file, upload, {
+      const uploadResult = await uploadVideoInChunks(file, upload, {
+        videoId: uploadState.videoId,
+        uploadId: uploadState.uploadId,
+        startAt: uploadState.nextByte,
         onChunkComplete: (nextByte) => {
           const nextUpload = { ...uploadState, nextByte };
           savePendingUpload(nextUpload);
@@ -267,19 +276,22 @@ export function UploadVideoForm() {
         onRetry: (attempt) =>
           setTransferStatus(`Reconnecting (attempt ${attempt} of 3)`),
         signal: controller.signal,
-        startAt: uploadState.nextByte,
-        uploadId: uploadState.uploadId,
       });
+
       const completedUpload = {
         ...uploadState,
-        cloudinaryPublicId: uploadedAsset.public_id,
+        cloudinaryPublicId: uploadResult.public_id,
       };
       savePendingUpload(completedUpload);
       setPendingUpload(completedUpload);
       setState('confirming');
       await confirmUpload(
         completedUpload.videoId,
-        completedUpload.cloudinaryPublicId,
+        {
+          uploadId: uploadResult.uploadId,
+          parts: uploadResult.parts,
+          publicId: uploadResult.public_id,
+        },
         controller.signal,
       );
       clearPendingUpload(file);
@@ -314,12 +326,12 @@ export function UploadVideoForm() {
 
   async function confirmUpload(
     videoId: string,
-    publicId: string | undefined,
+    completeInput: Parameters<typeof api.completeVideo>[1],
     signal: AbortSignal,
   ) {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        await api.completeVideo(videoId, publicId);
+        await api.completeVideo(videoId, completeInput);
         return;
       } catch (confirmError) {
         if (
@@ -693,7 +705,6 @@ export function UploadVideoForm() {
           speaker. Clear audio gives the transcription model the best results.
         </p>
       </main>
-      <AppFooter />
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { SubtitleBurnIn } from '../subtitles/subtitle-overlay';
+import type { SubtitleBurnIn } from '../subtitles/subtitle-style';
 
 export interface UploadSignatureInput {
   publicId: string;

@@ -1,10 +1,6 @@
 /**
  * Turns anything that can be thrown into a readable message.
- *
- * The Cloudinary SDK rejects with plain objects such as
- * `{ error: { message, http_code } }` or `{ message, http_code }` instead of
- * `Error` instances, so `error instanceof Error` checks reported them as
- * "unknown error" and hid the real reason a render failed.
+ * Supports Error instances, plain error objects ({ message, error }), and primitives.
  */
 export function describeError(
   error: unknown,

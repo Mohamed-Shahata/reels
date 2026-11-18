@@ -15,6 +15,7 @@ import {
   SUBTITLE_FONT_SIZE_LIMITS,
   SUBTITLE_FONTS,
   SUBTITLE_POSITIONS,
+  SUBTITLE_POSITION_LIMITS,
   SUBTITLE_PRESET_IDS,
   type SubtitleDisplayMode,
   type SubtitleFont,
@@ -69,6 +70,20 @@ export class SubtitleStyleQueryDto {
   @IsOptional()
   @IsIn(SUBTITLE_POSITIONS)
   position?: SubtitlePosition;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(SUBTITLE_POSITION_LIMITS.x.min)
+  @Max(SUBTITLE_POSITION_LIMITS.x.max)
+  positionX?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(SUBTITLE_POSITION_LIMITS.y.min)
+  @Max(SUBTITLE_POSITION_LIMITS.y.max)
+  positionY?: number;
 
   @IsOptional()
   @IsIn(SUBTITLE_DISPLAY_MODES)

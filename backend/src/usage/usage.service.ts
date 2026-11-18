@@ -3,6 +3,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env.schema';
@@ -18,6 +19,7 @@ export interface MonthlyUsage {
 
 @Injectable()
 export class UsageService {
+  private readonly logger = new Logger(UsageService.name);
   private readonly aiRunLimit: number;
 
   constructor(
@@ -70,6 +72,19 @@ export class UsageService {
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
+  }
+
+  commitAiRun(userId: string): void {
+    this.logger.debug(`Committed AI run for user ${userId}`);
+  }
+
+  async releaseAiRun(userId: string): Promise<void> {
+    const monthStart = this.parseMonth();
+    await this.prisma.usageRecord.updateMany({
+      where: { userId, monthStart, aiRunCount: { gt: 0 } },
+      data: { aiRunCount: { decrement: 1 } },
+    });
+    this.logger.debug(`Released reserved AI run for user ${userId}`);
   }
 
   private parseMonth(month?: string): Date {

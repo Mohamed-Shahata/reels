@@ -7,24 +7,51 @@ const userSchema = z.object({
   createdAt: z.string(),
 });
 
+const s3PartSchema = z.object({
+  partNumber: z.number().int().positive(),
+  url: z.string(),
+});
+
 const uploadSignatureSchema = z.object({
-  uploadUrl: z.url(),
-  cloudName: z.string(),
-  apiKey: z.string(),
-  timestamp: z.number(),
-  signature: z.string(),
-  publicId: z.string(),
-  resourceType: z.literal('video'),
+  uploadUrl: z.string().optional(),
+  cloudName: z.string().optional(),
+  apiKey: z.string().optional(),
+  timestamp: z.number().optional(),
+  signature: z.string().optional(),
+  publicId: z.string().optional(),
+  resourceType: z.literal('video').optional(),
+  allowedFormats: z.array(z.string().min(1)).optional(),
+  maxFileSizeBytes: z.number().int().positive().optional(),
+  maxDurationSec: z.number().positive().optional(),
+  uploadPreset: z.string().optional(),
+  storageFallbackEnabled: z.boolean().optional(),
+  uploadId: z.string().optional(),
+  storageKey: z.string().optional(),
+  parts: z.array(s3PartSchema).optional(),
+});
+
+export const uploadStatusSchema = z.object({
+  videoId: z.string(),
+  uploadId: z.string(),
+  storageKey: z.string(),
+  parts: z.array(
+    z.object({
+      partNumber: z.number().int().positive(),
+      eTag: z.string(),
+      size: z.number().min(0),
+    }),
+  ),
+});
+
+export const presignedPartsResponseSchema = z.object({
+  parts: z.array(s3PartSchema),
+});
+
+const uploadConstraintsSchema = z.object({
   allowedFormats: z.array(z.string().min(1)).min(1),
   maxFileSizeBytes: z.number().int().positive(),
   maxDurationSec: z.number().positive(),
-  uploadPreset: z.string().optional(),
-});
-
-const uploadConstraintsSchema = uploadSignatureSchema.pick({
-  allowedFormats: true,
-  maxFileSizeBytes: true,
-  maxDurationSec: true,
+  storageFallbackEnabled: z.boolean().optional(),
 });
 
 const createVideoSchema = z.object({
@@ -40,10 +67,10 @@ const createVideoSchema = z.object({
 const completedVideoSchema = z.object({
   id: z.string(),
   title: z.string(),
-  cloudinaryId: z.string(),
-  durationSec: z.number().positive(),
-  sizeBytes: z.string(),
-  status: z.literal('READY'),
+  cloudinaryId: z.string().nullish().default(''),
+  durationSec: z.number().min(0).optional().default(0),
+  sizeBytes: z.string().optional().default('0'),
+  status: z.enum(['READY', 'UPLOADED']),
 });
 
 const videoStatusSchema = z.enum(['UPLOADING', 'READY', 'FAILED']);
@@ -87,9 +114,24 @@ const clipSchema = z.object({
   startSec: z.number().min(0),
   endSec: z.number().positive(),
   source: z.enum(['MANUAL', 'AI']),
+  layout: z.enum(['AUTO', 'STACKED']).optional(),
+  thumbnailUrl: z.string().nullable().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
+
+export const reframePlanSchema = z.object({
+  id: z.string(),
+  videoId: z.string(),
+  version: z.number().int(),
+  contentType: z.enum(['SOLO', 'PODCAST']),
+  faces: z.unknown(),
+  speakerTurns: z.unknown().nullable().optional(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type ReframePlan = z.infer<typeof reframePlanSchema>;
 
 const clipsSchema = z.array(clipSchema);
 
@@ -134,6 +176,9 @@ export const subtitleStyleSchema = z.object({
   backgroundColor: hexColorSchema,
   backgroundOpacity: z.number().min(0).max(1),
   position: z.enum(['TOP', 'MIDDLE', 'BOTTOM']),
+  // Free placement in % of the frame; overrides `position` when both are set.
+  positionX: z.number().min(0).max(100).optional(),
+  positionY: z.number().min(0).max(100).optional(),
   // Renders made before word-by-word subtitles existed have no mode.
   displayMode: z.enum(['PHRASE', 'WORD']).default('PHRASE'),
 });
@@ -250,6 +295,10 @@ export type SubtitleStyleCatalog = z.infer<typeof subtitleStyleCatalogSchema>;
 export interface CreateVideoOptions {
   language?: 'ar' | 'en';
   autoClips?: boolean;
+  contentType?: 'SOLO' | 'PODCAST';
+  filename?: string;
+  contentTypeHeader?: string;
+  sizeBytes?: number;
 }
 
 export interface ClipUrlOptions {
@@ -368,11 +417,40 @@ export const api = {
     request(`/videos/${videoId}/upload-signature`, uploadSignatureSchema, {
       method: 'POST',
     }),
-  completeVideo: (videoId: string, publicId?: string) =>
-    request(`/videos/${videoId}/complete`, completedVideoSchema, {
+  getUploadStatus: (videoId: string, uploadId?: string) =>
+    request(
+      `/videos/${videoId}/upload${uploadId ? `?uploadId=${encodeURIComponent(uploadId)}` : ''}`,
+      uploadStatusSchema,
+    ),
+  presignUploadParts: (
+    videoId: string,
+    input: { uploadId: string; partNumbers: number[] },
+  ) =>
+    request(`/videos/${videoId}/upload/parts`, presignedPartsResponseSchema, {
       method: 'POST',
-      body: JSON.stringify(publicId ? { publicId } : {}),
+      body: JSON.stringify(input),
     }),
+  completeVideo: (
+    videoId: string,
+    input?:
+      | string
+      | {
+          uploadId?: string;
+          parts?: Array<{ partNumber: number; eTag: string }>;
+          publicId?: string;
+        },
+  ) => {
+    const body =
+      typeof input === 'string'
+        ? { publicId: input }
+        : input
+          ? input
+          : {};
+    return request(`/videos/${videoId}/complete`, completedVideoSchema, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
   renameVideo: (videoId: string, title: string) =>
     request(`/videos/${videoId}`, libraryVideoSchema, {
       method: 'PATCH',
@@ -414,7 +492,12 @@ export const api = {
     }),
   updateClip: (
     clipId: string,
-    input: Partial<{ title: string; startSec: number; endSec: number }>,
+    input: Partial<{
+      title: string;
+      startSec: number;
+      endSec: number;
+      layout: 'AUTO' | 'STACKED';
+    }>,
   ) =>
     request(`/clips/${clipId}`, clipSchema, {
       method: 'PATCH',
@@ -428,6 +511,12 @@ export const api = {
     request(`/videos/${videoId}/processing`, processingJobsSchema),
   getVideoTranscript: (videoId: string) =>
     request(`/videos/${videoId}/transcript`, transcriptSchema),
+  getTranscriptExportUrl: (
+    videoId: string,
+    format: 'srt' | 'vtt' | 'txt',
+  ) => `/api/v1/videos/${videoId}/transcript.${format}`,
+  getVideoReframePlan: (videoId: string) =>
+    request(`/videos/${videoId}/reframe`, reframePlanSchema),
   startTranscription: (videoId: string) =>
     request(`/videos/${videoId}/transcribe`, processingJobSchema, {
       method: 'POST',

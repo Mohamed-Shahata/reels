@@ -75,6 +75,8 @@ export function sameStyle(
       second.backgroundColor.toLowerCase() &&
     first.backgroundOpacity === second.backgroundOpacity &&
     first.position === second.position &&
+    first.positionX === second.positionX &&
+    first.positionY === second.positionY &&
     first.displayMode === second.displayMode
   );
 }

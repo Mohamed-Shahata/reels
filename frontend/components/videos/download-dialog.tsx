@@ -70,20 +70,20 @@ function ResultBadge({ kind }: { kind: 'success' | 'error' }) {
       <span
         aria-hidden="true"
         className={`absolute inset-0 rounded-full opacity-20 ${
-          success ? 'bg-[#0f766e]' : 'bg-[#b42318]'
+          success ? 'bg-emerald-500' : 'bg-rose-500'
         }`}
       />
       <span
         aria-hidden="true"
         className={`absolute inset-3 rounded-full opacity-25 ${
-          success ? 'bg-[#0f766e]' : 'bg-[#b42318]'
+          success ? 'bg-emerald-500' : 'bg-rose-500'
         }`}
       />
       <span
-        className={`relative flex h-16 w-16 items-center justify-center rounded-full text-white shadow-lg ${
+        className={`relative flex h-16 w-16 items-center justify-center rounded-full text-zinc-950 shadow-lg ${
           success
-            ? 'bg-[#0f766e] shadow-[#0f766e]/30'
-            : 'bg-[#b42318] shadow-[#b42318]/30'
+            ? 'bg-emerald-500 shadow-emerald-500/30'
+            : 'bg-rose-500 text-white shadow-rose-500/30'
         }`}
       >
         <svg
@@ -112,9 +112,9 @@ function ResultBadge({ kind }: { kind: 'success' | 'error' }) {
 }
 
 const secondaryBtn =
-  'h-9 rounded-lg border border-[#d5dcd8] bg-white px-4 text-sm font-medium text-[#263532] hover:bg-[#f6f8f7] disabled:cursor-not-allowed disabled:opacity-50';
+  'h-9 rounded-lg border border-zinc-700 bg-zinc-800 px-4 text-sm font-medium text-zinc-200 hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-50 transition-colors';
 const primaryBtn =
-  'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-[#0f766e] px-4 text-sm font-semibold text-white hover:bg-[#0b5a54] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]';
+  'inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-500 px-4 text-sm font-bold text-zinc-950 hover:bg-emerald-400 shadow-md shadow-emerald-500/20 disabled:cursor-not-allowed disabled:bg-zinc-800 disabled:text-zinc-500 disabled:shadow-none transition-colors';
 
 export function DownloadDialog({
   open,
@@ -163,10 +163,10 @@ export function DownloadDialog({
 
   const barColor =
     phase === 'error'
-      ? 'bg-[#b42318]'
+      ? 'bg-rose-500'
       : phase === 'success'
-        ? 'bg-[#0f766e]'
-        : 'bg-[#0f766e]';
+        ? 'bg-emerald-500'
+        : 'bg-gradient-to-r from-emerald-600 via-emerald-400 to-teal-500';
   const percent =
     progress && progress.total > 0
       ? Math.round((progress.done / progress.total) * 100)
@@ -174,7 +174,7 @@ export function DownloadDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#0f1f1c]/55 px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md px-4"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !working) onClose();
       }}
@@ -182,7 +182,7 @@ export function DownloadDialog({
       <div
         aria-labelledby={titleId}
         aria-modal="true"
-        className="w-full max-w-md overflow-hidden rounded-xl bg-white shadow-2xl"
+        className="w-full max-w-md overflow-hidden rounded-2xl bg-zinc-900/95 border border-zinc-800 shadow-2xl text-zinc-100 backdrop-blur-xl"
         role="dialog"
       >
         <div className={`h-1 ${barColor}`} />
@@ -190,23 +190,23 @@ export function DownloadDialog({
         {phase === 'confirm' ? (
           <div className="p-5">
             <h2
-              className="flex items-center gap-2 text-lg font-bold text-[#172321]"
+              className="flex items-center gap-2 text-lg font-bold text-zinc-100"
               id={titleId}
             >
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e4f3ef] text-[#0f766e]">
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
                 <DownloadIcon />
               </span>
               Download {zip ? `${items.length} clips` : 'clip'}
             </h2>
 
-            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-[#f2f6f4] px-3 py-2 text-xs text-[#44534e]">
-              <span className="rounded-full bg-white px-2 py-0.5 font-semibold text-[#0f766e] ring-1 ring-[#d5e2dc]">
+            <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg bg-zinc-800/60 border border-zinc-800 px-3 py-2 text-xs text-zinc-300">
+              <span className="rounded-full bg-zinc-800 px-2 py-0.5 font-semibold text-emerald-400 border border-zinc-700">
                 {aspect}
               </span>
-              <span className="rounded-full bg-white px-2 py-0.5 font-semibold ring-1 ring-[#d5e2dc]">
+              <span className="rounded-full bg-zinc-800 px-2 py-0.5 font-semibold border border-zinc-700">
                 {subtitlesOn ? 'With subtitles' : 'No subtitles'}
               </span>
-              <span className="rounded-full bg-white px-2 py-0.5 font-semibold ring-1 ring-[#d5e2dc]">
+              <span className="rounded-full bg-zinc-800 px-2 py-0.5 font-semibold border border-zinc-700">
                 {zip ? 'ZIP file' : 'MP4 file'}
               </span>
             </div>
@@ -217,25 +217,25 @@ export function DownloadDialog({
             >
               {items.map((item) => (
                 <li
-                  className="flex items-center gap-2 rounded-lg border border-[#e2eae6] bg-[#fafcfb] px-2.5 py-1.5 text-sm"
+                  className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-800/50 px-2.5 py-1.5 text-sm"
                   key={item.id}
                 >
-                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0f766e] px-1.5 text-[11px] font-bold text-white">
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-zinc-950">
                     {item.number}
                   </span>
                   <span
-                    className="min-w-0 flex-1 truncate font-semibold"
+                    className="min-w-0 flex-1 truncate font-semibold text-zinc-200"
                     dir="auto"
                     style={cairo}
                     title={item.title}
                   >
                     {item.title}
                   </span>
-                  <span className="shrink-0 text-xs text-[#5d6d68]">
+                  <span className="shrink-0 text-xs text-zinc-400">
                     {item.length}
                   </span>
                   {item.note ? (
-                    <span className="shrink-0 rounded-full bg-[#fff4e0] px-1.5 py-0.5 text-[10px] font-semibold text-[#8a5a00]">
+                    <span className="shrink-0 rounded-full bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.5 text-[10px] font-semibold text-amber-300">
                       {item.note}
                     </span>
                   ) : null}
@@ -248,15 +248,15 @@ export function DownloadDialog({
               className="mt-4 flex items-center justify-between gap-3"
               role="group"
             >
-              <span className="text-sm font-semibold">Version</span>
-              <div className="flex rounded-lg border border-[#d5e2dc] bg-[#f6f8f7] p-0.5 text-xs font-semibold">
+              <span className="text-sm font-semibold text-zinc-200">Version</span>
+              <div className="flex rounded-lg border border-zinc-800 bg-zinc-950/80 p-0.5 text-xs font-semibold">
                 {(['9:16', '16:9'] as const).map((value) => (
                   <button
                     aria-pressed={aspect === value}
-                    className={`rounded-md px-3 py-1 ${
+                    className={`rounded-md px-3 py-1 transition-colors ${
                       aspect === value
-                        ? 'bg-white text-[#0f766e] shadow-sm'
-                        : 'text-[#5d6d68] hover:text-[#0f766e]'
+                        ? 'bg-zinc-800 text-emerald-400 shadow-sm border border-zinc-700/60'
+                        : 'text-zinc-400 hover:text-emerald-400'
                     }`}
                     key={value}
                     onClick={() => onAspectChange(value)}
@@ -269,17 +269,17 @@ export function DownloadDialog({
             </div>
 
             <label
-              className={`mt-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 ${
+              className={`mt-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 transition-colors ${
                 subtitlesLocked
-                  ? 'border-[#e2eae6] bg-[#f6f8f7] opacity-70'
-                  : 'cursor-pointer border-[#d5e2dc] hover:border-[#0f766e]'
+                  ? 'border-zinc-800 bg-zinc-900/60 opacity-60'
+                  : 'cursor-pointer border-zinc-800 bg-zinc-850 hover:border-emerald-500/50 hover:bg-zinc-800/60'
               }`}
             >
               <span>
-                <span className="block text-sm font-semibold">
+                <span className="block text-sm font-semibold text-zinc-100">
                   Download with subtitles
                 </span>
-                <span className="block text-xs text-[#5d6d68]">
+                <span className="block text-xs text-zinc-400">
                   {!subtitlesAvailable
                     ? 'Transcribe the video to add subtitles.'
                     : aspect !== '9:16'
@@ -296,13 +296,13 @@ export function DownloadDialog({
                   role="switch"
                   type="checkbox"
                 />
-                <span className="absolute inset-0 rounded-full bg-[#c9d6d0] transition-colors peer-checked:bg-[#0f766e] peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#0f766e]" />
+                <span className="absolute inset-0 rounded-full bg-zinc-700 transition-colors peer-checked:bg-emerald-500 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-emerald-500" />
                 <span className="absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform peer-checked:translate-x-5" />
               </span>
             </label>
 
             {subtitlesOn && renderCount > 0 ? (
-              <p className="mt-2 rounded-lg bg-[#fff4e0] px-3 py-2 text-xs text-[#8a5a00]">
+              <p className="mt-2 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-amber-300">
                 {renderCount === 1
                   ? '1 clip has no subtitled reel yet'
                   : `${renderCount} clips have no subtitled reel yet`}
@@ -310,9 +310,9 @@ export function DownloadDialog({
               </p>
             ) : null}
 
-            <p className="mt-3 truncate text-xs text-[#5d6d68]" dir="auto">
+            <p className="mt-3 truncate text-xs text-zinc-400" dir="auto">
               Saved as{' '}
-              <span className="font-semibold text-[#263532]">{fileName}</span>
+              <span className="font-semibold text-zinc-200">{fileName}</span>
             </p>
 
             <div className="mt-5 flex justify-end gap-2">
@@ -339,12 +339,12 @@ export function DownloadDialog({
               Preparing your download
             </h2>
             <div className="mx-auto flex h-24 w-24 items-center justify-center">
-              <span className="h-14 w-14 animate-spin rounded-full border-4 border-[#dce6e1] border-t-[#0f766e] motion-reduce:animate-none" />
+              <span className="h-14 w-14 animate-spin rounded-full border-4 border-zinc-700 border-t-emerald-500 motion-reduce:animate-none" />
             </div>
-            <p className="mt-2 text-base font-bold text-[#172321]">
+            <p className="mt-2 text-base font-bold text-zinc-100">
               {progressLabel ?? 'Preparing your download...'}
             </p>
-            <p className="mt-1 text-xs text-[#5d6d68]">
+            <p className="mt-1 text-xs text-zinc-400">
               Keep this tab open. The file will start downloading when it is
               ready.
             </p>
@@ -354,11 +354,11 @@ export function DownloadDialog({
                 aria-valuemax={100}
                 aria-valuemin={0}
                 aria-valuenow={percent}
-                className="mx-auto mt-4 h-2 max-w-xs overflow-hidden rounded-full bg-[#e3ece8]"
+                className="mx-auto mt-4 h-2 max-w-xs overflow-hidden rounded-full bg-zinc-800"
                 role="progressbar"
               >
                 <div
-                  className="h-full rounded-full bg-[#0f766e] transition-[width] duration-500"
+                  className="h-full rounded-full bg-emerald-500 transition-[width] duration-500"
                   style={{ width: `${Math.max(percent, 4)}%` }}
                 />
               </div>
@@ -379,22 +379,22 @@ export function DownloadDialog({
         {phase === 'success' ? (
           <div className="p-6 text-center" role="status">
             <ResultBadge kind="success" />
-            <h2 className="mt-2 text-xl font-bold text-[#172321]" id={titleId}>
+            <h2 className="mt-2 text-xl font-bold text-zinc-100" id={titleId}>
               Download started
             </h2>
-            <p className="mt-1 text-sm text-[#44534e]">
+            <p className="mt-1 text-sm text-zinc-400">
               {zip
                 ? `${items.length - skippedCount} clips are in your ZIP file.`
                 : 'Your clip is saving to your device.'}
             </p>
             <p
-              className="mx-auto mt-3 max-w-full truncate rounded-lg bg-[#f2f6f4] px-3 py-2 text-xs font-semibold text-[#263532]"
+              className="mx-auto mt-3 max-w-full truncate rounded-lg bg-zinc-800/80 border border-zinc-700 px-3 py-2 text-xs font-semibold text-zinc-200"
               dir="auto"
             >
               {fileName}
             </p>
             {skippedCount > 0 ? (
-              <p className="mt-3 rounded-lg bg-[#fff4e0] px-3 py-2 text-xs text-[#8a5a00]">
+              <p className="mt-3 rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-amber-300">
                 {skippedCount === 1
                   ? '1 clip was skipped because it failed.'
                   : `${skippedCount} clips were skipped because they failed.`}
@@ -416,10 +416,10 @@ export function DownloadDialog({
         {phase === 'error' ? (
           <div className="p-6 text-center" role="alert">
             <ResultBadge kind="error" />
-            <h2 className="mt-2 text-xl font-bold text-[#172321]" id={titleId}>
+            <h2 className="mt-2 text-xl font-bold text-zinc-100" id={titleId}>
               Download failed
             </h2>
-            <p className="mt-1 text-sm text-[#44534e]">
+            <p className="mt-1 text-sm text-zinc-400">
               {errorMessage ?? 'Something went wrong. Please try again.'}
             </p>
             <div className="mt-5 flex justify-center gap-2">

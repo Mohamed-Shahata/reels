@@ -5,15 +5,17 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, type ProcessingJobStatus } from '../generated/prisma/client';
+import {
+  Prisma,
+  type JobStatus as ProcessingJobStatus,
+} from '../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ProcessingJobsService } from '../processing/processing-jobs.service';
-import { StorageService } from '../storage/storage.service';
+import { MediaAssetService } from '../storage/media-asset.service';
+import { ConfigService } from '@nestjs/config';
+import type { Env } from '../config/env.schema';
 import {
-  readStoredBurnIn,
   type SubtitleBurnIn,
-} from '../subtitles/subtitle-overlay';
-import {
   resolveSubtitleStyle,
   type SubtitleStyle,
 } from '../subtitles/subtitle-style';
@@ -27,7 +29,7 @@ import type { CreateClipRenderDto } from './dto/create-clip-render.dto';
 import type { CreateRenderDto } from './dto/create-render.dto';
 
 const REUSABLE_STATUSES: ProcessingJobStatus[] = [
-  'PENDING',
+  'QUEUED',
   'RUNNING',
   'COMPLETED',
 ];
@@ -47,7 +49,7 @@ const renderSelect = {
     select: {
       status: true,
       progress: true,
-      attempts: true,
+      attempt: true,
       lastError: true,
     },
   },
@@ -66,7 +68,7 @@ interface RenderRecord {
   processingJob: {
     status: ProcessingJobStatus;
     progress: number;
-    attempts: number;
+    attempt: number;
     lastError: string | null;
   } | null;
 }
@@ -93,9 +95,9 @@ function toView(record: RenderRecord): RenderView {
   return {
     id: record.id,
     clipId: record.clipId,
-    status: job?.status ?? 'PENDING',
+    status: job?.status ?? 'QUEUED',
     progress: job?.progress ?? 0,
-    attempts: job?.attempts ?? 0,
+    attempts: job?.attempt ?? 0,
     error: job?.lastError ?? null,
     startSec: record.startSec,
     endSec: record.endSec,
@@ -129,7 +131,7 @@ interface PreparedBurnIn {
 
 // Raise when the way subtitles are drawn changes (padding, box opacity...), so
 // finished reels made the old way are not reused for the same style and text.
-const SUBTITLE_RENDER_VERSION = 2;
+const SUBTITLE_RENDER_VERSION = 3;
 
 function computeSubtitleKey(burnIn: SubtitleBurnIn): string {
   return createHash('sha256')
@@ -139,12 +141,18 @@ function computeSubtitleKey(burnIn: SubtitleBurnIn): string {
 
 @Injectable()
 export class RendersService {
+  private readonly downloadTtlSec: number;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jobs: ProcessingJobsService,
     private readonly subtitles: SubtitlesService,
-    private readonly storage: StorageService,
-  ) {}
+    private readonly mediaAssets?: MediaAssetService,
+    config?: ConfigService<Env, true>,
+  ) {
+    this.downloadTtlSec =
+      config?.get('DOWNLOAD_URL_TTL_SEC', { infer: true }) ?? 300;
+  }
 
   async create(
     userId: string,
@@ -168,7 +176,6 @@ export class RendersService {
           select: {
             id: true,
             status: true,
-            cloudinaryId: true,
             transcript: { select: { id: true } },
           },
         },
@@ -179,7 +186,7 @@ export class RendersService {
       throw new NotFoundException('Clip was not found');
     }
 
-    if (clip.video.status !== 'READY' || !clip.video.cloudinaryId) {
+    if (clip.video.status !== 'READY') {
       throw new ConflictException('Video is not ready for rendering');
     }
 
@@ -244,35 +251,14 @@ export class RendersService {
       },
       select: {
         id: true,
-        startSec: true,
-        endSec: true,
-        subtitleStyle: true,
-        subtitleCues: true,
-        clip: { select: { video: { select: { cloudinaryId: true } } } },
+        assetId: true,
       },
     });
     if (renders.length === 0) return { deleted: 0 };
 
-    // Best effort: the database rows are what the app reads, so a copy that
-    // cannot be removed from Cloudinary must not block the delete.
     for (const render of renders) {
-      const publicId = render.clip.video.cloudinaryId;
-      if (!publicId) continue;
-      try {
-        const burnIn = readStoredBurnIn(
-          render.subtitleStyle,
-          render.subtitleCues,
-        );
-        if (burnIn) {
-          await this.storage.deleteClipReelRender(
-            publicId,
-            render.startSec,
-            render.endSec,
-            burnIn,
-          );
-        }
-      } catch {
-        // Unreadable stored subtitles: nothing to remove from Cloudinary.
+      if (render.assetId && this.mediaAssets) {
+        await this.mediaAssets.markDeleting(this.prisma, render.assetId);
       }
     }
 
@@ -297,12 +283,12 @@ export class RendersService {
     const status = render.processingJob?.status;
     if (
       !render.processingJobId ||
-      (status !== 'PENDING' && status !== 'RUNNING')
+      (status !== 'QUEUED' && status !== 'RUNNING')
     ) {
       throw new ConflictException('Only a render in progress can be stopped');
     }
 
-    await this.jobs.stopJob(render.processingJobId);
+    await this.jobs.cancelJob(render.processingJobId);
     const refreshed = await this.prisma.clipRender.findFirstOrThrow({
       where: { id: render.id },
       select: renderSelect,
@@ -336,7 +322,7 @@ export class RendersService {
     const active = await this.prisma.clipRender.findMany({
       where: {
         ...scope,
-        processingJob: { is: { status: { in: ['PENDING', 'RUNNING'] } } },
+        processingJob: { is: { status: { in: ['QUEUED', 'RUNNING'] } } },
       },
       select: { id: true, processingJobId: true },
     });
@@ -345,7 +331,7 @@ export class RendersService {
     for (const render of active) {
       if (!render.processingJobId) continue;
       try {
-        await this.jobs.stopJob(render.processingJobId);
+        await this.jobs.cancelJob(render.processingJobId);
         stopped.push(render.id);
       } catch (error) {
         // It finished between the lookup and now; leave it as it is.
@@ -372,7 +358,6 @@ export class RendersService {
       select: {
         id: true,
         status: true,
-        cloudinaryId: true,
         transcript: { select: { id: true } },
         clips: {
           orderBy: { startSec: 'asc' },
@@ -385,7 +370,7 @@ export class RendersService {
       throw new NotFoundException('Video was not found');
     }
 
-    if (video.status !== 'READY' || !video.cloudinaryId) {
+    if (video.status !== 'READY') {
       throw new ConflictException('Video is not ready for rendering');
     }
 
@@ -499,13 +484,15 @@ export class RendersService {
       where: { id: renderId, clip: { is: { video: { is: { userId } } } } },
       select: {
         id: true,
+        assetId: true,
+        outputUrl: true,
         startSec: true,
         endSec: true,
         subtitleStyle: true,
         subtitleCues: true,
         processingJob: { select: { status: true } },
         clip: {
-          select: { id: true, video: { select: { cloudinaryId: true } } },
+          select: { id: true },
         },
       },
     });
@@ -514,23 +501,23 @@ export class RendersService {
       throw new NotFoundException('Render was not found');
     }
 
-    const publicId = render.clip.video.cloudinaryId;
-    if (render.processingJob?.status !== 'COMPLETED' || !publicId) {
+    if (
+      render.processingJob?.status !== 'COMPLETED' &&
+      !render.assetId &&
+      !render.outputUrl
+    ) {
       throw new ConflictException('Render is not ready to download');
     }
 
-    const burnIn = readStoredBurnIn(render.subtitleStyle, render.subtitleCues);
-    const suffix = burnIn ? '-9x16-subtitled' : '-9x16';
-    // Make sure the subtitle file exists (older renders may not have one).
-    if (burnIn) await this.storage.ensureSubtitleFile(burnIn);
+    if (render.assetId && this.mediaAssets) {
+      return this.mediaAssets.signedUrl(render.assetId, this.downloadTtlSec);
+    }
 
-    return this.storage.getClipDownloadUrl(
-      publicId,
-      render.startSec,
-      render.endSec,
-      `clip-${render.clip.id}${suffix}`,
-      { reframe: true, subtitles: burnIn ?? undefined },
-    );
+    if (render.outputUrl) {
+      return render.outputUrl;
+    }
+
+    throw new ConflictException('Render is not ready to download');
   }
 
   private async refreshBurnIn(render: {
@@ -662,7 +649,7 @@ export class RendersService {
         endSec: clip.endSec,
         ...(burnIn && {
           subtitleStyle: burnIn.style as unknown as Prisma.InputJsonValue,
-          subtitleCues: burnIn.cues as unknown as Prisma.InputJsonValue,
+          subtitleCues: burnIn.cues,
           subtitleKey,
           ...(prepared && prepared.edits.length > 0
             ? {

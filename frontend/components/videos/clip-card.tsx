@@ -40,11 +40,11 @@ interface ClipCardProps {
 const cairo = { fontFamily: 'var(--font-cairo), sans-serif' };
 
 function badgeClass(clip: Clip, score: number): string {
-  if (clip.source !== 'AI') return 'bg-[#e5e7eb] text-[#374151]';
+  if (clip.source !== 'AI') return 'bg-zinc-800 text-zinc-300 border border-zinc-700/60';
   const tier = scoreTier(score);
-  if (tier === 'Viral') return 'bg-[#d1fae5] text-[#047857]';
-  if (tier === 'Strong') return 'bg-[#dbeafe] text-[#1d4ed8]';
-  return 'bg-[#e5e7eb] text-[#374151]';
+  if (tier === 'Viral') return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+  if (tier === 'Strong') return 'bg-blue-500/15 text-blue-400 border border-blue-500/30';
+  return 'bg-zinc-800 text-zinc-300 border border-zinc-700/60';
 }
 
 function TrimIcon() {
@@ -146,10 +146,10 @@ function IconButton({
   return (
     <button
       aria-label={label}
-      className={`flex h-8 w-8 items-center justify-center rounded-lg border bg-white disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         danger
-          ? 'border-[#ecd0ca] text-[#a13a28] hover:border-[#c44932] hover:bg-[#fff2ef]'
-          : 'border-[#d5e2dc] text-[#3f4f4a] hover:border-[#0f766e] hover:bg-[#e4f3ef] hover:text-[#0f766e]'
+          ? 'border-zinc-800 bg-zinc-800/80 text-rose-400 hover:border-rose-500/50 hover:bg-rose-500/10 hover:text-rose-300'
+          : 'border-zinc-800 bg-zinc-800/80 text-zinc-300 hover:border-emerald-500/50 hover:bg-emerald-500/10 hover:text-emerald-400'
       }`}
       disabled={disabled}
       onClick={onClick}
@@ -211,7 +211,7 @@ export function ClipCard({
           <input
             aria-label={`Select ${clip.title} for merge`}
             checked={selected}
-            className="mt-1 h-4 w-4 cursor-pointer accent-[#0f766e] disabled:cursor-not-allowed"
+            className="mt-1 h-4 w-4 cursor-pointer accent-emerald-500 disabled:cursor-not-allowed"
             disabled={busy}
             onChange={onToggleSelect}
             type="checkbox"
@@ -220,7 +220,7 @@ export function ClipCard({
             {number ? (
               <span
                 aria-label={`Clip number ${number}`}
-                className="mr-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[#0f766e] px-1.5 text-[11px] font-bold text-white"
+                className="mr-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-zinc-950"
                 title={`Clip ${number} in the episode`}
               >
                 {number}
@@ -238,7 +238,7 @@ export function ClipCard({
               <input
                 aria-label={`Rename ${clip.title}`}
                 autoFocus
-                className="mt-1 block h-8 w-full rounded-md border border-[#0f766e] px-2 text-sm font-bold"
+                className="mt-1 block h-8 w-full rounded-md border border-emerald-500 bg-zinc-950 px-2 text-sm font-bold text-zinc-100 ring-1 ring-emerald-500/50"
                 dir="auto"
                 disabled={saving}
                 maxLength={255}
@@ -253,7 +253,7 @@ export function ClipCard({
               />
             ) : (
               <button
-                className="mt-1.5 block w-full min-w-0 text-start text-[15px] font-bold leading-snug hover:text-[#0f766e]"
+                className="mt-1.5 block w-full min-w-0 text-start text-[15px] font-bold leading-snug text-zinc-100 hover:text-emerald-400 transition-colors"
                 dir="auto"
                 onClick={onPreview}
                 style={cairo}
@@ -275,13 +275,13 @@ export function ClipCard({
 
       <div className="mt-1 flex items-center justify-between text-xs">
         <button
-          className="rounded-md bg-[#e4f3ef] px-1.5 py-0.5 font-mono text-[#0f766e] hover:bg-[#d3ebe5]"
+          className="rounded-md border border-zinc-700/60 bg-zinc-800/80 px-1.5 py-0.5 font-mono text-emerald-400 hover:border-emerald-500/40 hover:bg-zinc-700/80 transition-colors"
           onClick={onSeek}
           type="button"
         >
           {formatClock(clip.startSec)} - {formatClock(clip.endSec)}
         </button>
-        <span className="text-[#5d6d68]">
+        <span className="text-zinc-400">
           {formatClipLength(clip.startSec, clip.endSec)}
         </span>
       </div>
@@ -302,21 +302,21 @@ export function ClipCard({
 
   return (
     <li
-      className={`rounded-2xl border p-3.5 ${active ? 'border-[#0f766e] bg-[#eef8f5] shadow-[0_0_0_3px_rgba(15,118,110,0.10)]' : 'border-[#e2eae6] bg-[#fafcfb] hover:border-[#c9ddd5]'}`}
+      className={`rounded-2xl border p-3.5 transition-all duration-200 ${active ? 'border-emerald-500/80 bg-zinc-900/90 shadow-[0_0_0_2px_rgba(16,185,129,0.25)]' : 'border-zinc-800/90 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900/80 shadow-md'}`}
     >
       {isPortrait ? (
         /* ── 9:16 portrait layout: thumbnail left | info+controls right ── */
         <div className="flex gap-3">
           {/* Left: 9:16 thumbnail — fixed ratio, never stretches with the card */}
           <div className="w-[7.5rem] shrink-0 self-start sm:w-36">
-            <div className="aspect-[9/16] w-full overflow-hidden rounded-lg">
+            <div className="aspect-[9/16] w-full overflow-hidden rounded-xl">
               {reel.thumbnail}
             </div>
           </div>
           {/* Right: top info + bottom reel controls */}
           <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
             <div>{topSection}</div>
-            <div className="border-t border-[#eef2f0] pt-2">
+            <div className="border-t border-zinc-800/80 pt-2">
               {reel.controls}
             </div>
           </div>
@@ -327,10 +327,10 @@ export function ClipCard({
           {topSection}
           {reel != null && (
             <>
-              <div className="my-1 flex w-full justify-center overflow-hidden rounded-lg">
+              <div className="my-1 flex w-full justify-center overflow-hidden rounded-xl">
                 <div className="w-full max-w-md">{reel.thumbnail}</div>
               </div>
-              <div className="border-t border-[#eef2f0] pt-2">
+              <div className="border-t border-zinc-800/80 pt-2">
                 {reel.controls}
               </div>
             </>

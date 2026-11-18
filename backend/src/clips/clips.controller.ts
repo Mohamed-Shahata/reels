@@ -9,9 +9,12 @@ import {
   Patch,
   Post,
   Query,
+  Res,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthContext } from '../auth/jwt-auth.guard';
+import { Public } from '../auth/public.decorator';
 import { ClipsService } from './clips.service';
 import { AiClipRunsService } from './ai-clip-runs.service';
 import { ClipUrlQueryDto } from './dto/clip-url-query.dto';
@@ -110,6 +113,28 @@ export class ClipsController {
         reframe: query.reframe,
       }),
     };
+  }
+
+  @Public()
+  @Get('clips/:id/download-file')
+  async downloadFile(
+    @Param('id') id: string,
+    @Query('filename') filename: string,
+    @Query('reframe') reframe: string,
+    @Res() res: Response,
+  ) {
+    return this.clips.downloadClipFile(
+      id,
+      filename || `clip-${id}`,
+      reframe === 'true',
+      res,
+    );
+  }
+
+  @Public()
+  @Get(['clips/:id/thumbnail', ':id/thumbnail'])
+  async thumbnail(@Param('id') id: string, @Res() res: Response) {
+    return this.clips.serveThumbnail(id, res);
   }
 
   @Delete('clips/:id')

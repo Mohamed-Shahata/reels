@@ -10,6 +10,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "typecheck": "next typegen && tsc --noEmit",
+    "check-colors": "node scripts/check-colors.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

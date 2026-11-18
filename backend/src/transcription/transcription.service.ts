@@ -1,12 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { StorageService } from '../storage/storage.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { createWriteStream } from 'node:fs';
 import { mkdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import ffmpeg from 'fluent-ffmpeg';
 import Groq from 'groq-sdk';
@@ -18,13 +14,13 @@ export interface AudioChunk {
   endSec: number;
 }
 
-interface GroqWord {
+export interface GroqWord {
   word: string;
   start: number;
   end: number;
 }
 
-interface GroqSegment {
+export interface GroqSegment {
   start: number;
   end: number;
   text: string;
@@ -64,7 +60,6 @@ export class TranscriptionService {
 
   constructor(
     config: ConfigService<Env, true>,
-    private readonly storageService: StorageService,
     private readonly prisma: PrismaService,
   ) {
     this.groq = new Groq({
@@ -72,44 +67,20 @@ export class TranscriptionService {
     });
   }
 
-  // ─── 5.2 Audio Extraction ──────────────────────────────────────────────────
-
-  async extractAudio(videoId: string, cloudinaryId: string): Promise<string> {
-    const url = this.storageService.getAudioDownloadUrl(cloudinaryId);
-    this.logger.debug(`Downloading audio for video ${videoId}`);
-
-    const res = await fetch(url);
-    if (!res.ok || !res.body) {
-      throw new Error(
-        `Failed to fetch audio from Cloudinary: ${res.status} ${res.statusText}`,
-      );
-    }
-
-    const tempDir = join(tmpdir(), 'podcast-reels');
-    await mkdir(tempDir, { recursive: true });
-
-    const outputPath = join(tempDir, `${videoId}.mp3`);
-
-    // @ts-expect-error Node.js Readable.fromWeb types might not perfectly match fetch body
-    const readable = Readable.fromWeb(res.body);
-    const writable = createWriteStream(outputPath);
-
-    await pipeline(readable, writable);
-
-    this.logger.debug(`Audio saved to ${outputPath}`);
-    return outputPath;
-  }
-
   // ─── 5.3 Audio Chunking ────────────────────────────────────────────────────
 
-  async chunkAudio(audioPath: string, videoId: string): Promise<AudioChunk[]> {
+  async chunkAudio(
+    audioPath: string,
+    videoId: string,
+    outputDir?: string,
+  ): Promise<AudioChunk[]> {
     const duration = await this.getAudioDuration(audioPath);
     const chunks: AudioChunk[] = [];
 
     let currentStart = 0;
     let chunkIndex = 0;
 
-    const tempDir = join(tmpdir(), 'podcast-reels', videoId);
+    const tempDir = outputDir ?? join(tmpdir(), 'podcast-reels', videoId);
     await mkdir(tempDir, { recursive: true });
 
     this.logger.debug(`Chunking ${audioPath} (${duration}s)`);
@@ -205,7 +176,7 @@ export class TranscriptionService {
     return [];
   }
 
-  private async transcribeChunk(
+  async transcribeChunk(
     chunk: AudioChunk,
     language: string,
   ): Promise<GroqSegment[]> {
