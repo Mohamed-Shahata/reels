@@ -1,17 +1,22 @@
 'use client';
 
+import { useState, type ReactNode } from 'react';
 import type { Clip } from '@/lib/api';
 import { formatClipLength, scoreTier } from '@/lib/clip-insights';
 import { formatClock } from '@/lib/trimmer';
-import { useState, type ReactNode } from 'react';
+import {
+  ScissorsIcon,
+  DownloadIcon,
+  TrashIcon,
+  EditIcon,
+} from '@/components/ui/icons';
 
 export type ReelAspect = '9:16' | '16:9';
 
-interface ClipCardProps {
+export interface ClipCardProps {
   clip: Clip;
   score: number;
   hook: boolean;
-  /** 1-based place of the clip in the episode, shown as a badge. */
   number?: number;
   active: boolean;
   selected: boolean;
@@ -23,11 +28,6 @@ interface ClipCardProps {
   onDownload: () => void;
   onDelete: () => void;
   onRename: (title: string) => Promise<boolean>;
-  /**
-   * Render prop — receives the current aspect so the reel section can
-   * stay in sync with the card layout.  Must return:
-   * { thumbnail: ReactNode; controls: ReactNode }
-   */
   renderReel?: (
     aspect: ReelAspect,
     onAspectChange: (a: ReelAspect) => void,
@@ -37,97 +37,12 @@ interface ClipCardProps {
   };
 }
 
-const cairo = { fontFamily: 'var(--font-cairo), sans-serif' };
-
 function badgeClass(clip: Clip, score: number): string {
-  if (clip.source !== 'AI') return 'bg-zinc-800 text-zinc-300 border border-zinc-700/60';
+  if (clip.source !== 'AI') return 'bg-muted text-muted-foreground border-border';
   const tier = scoreTier(score);
-  if (tier === 'Viral') return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
-  if (tier === 'Strong') return 'bg-blue-500/15 text-blue-400 border border-blue-500/30';
-  return 'bg-zinc-800 text-zinc-300 border border-zinc-700/60';
-}
-
-function TrimIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height="14"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-      width="14"
-    >
-      <circle cx="6" cy="6" r="3" />
-      <circle cx="6" cy="18" r="3" />
-      <line x1="20" x2="8.12" y1="4" y2="15.88" />
-      <line x1="14.47" x2="20" y1="9.53" y2="20" />
-      <line x1="8.12" x2="12" y1="8.12" y2="12" />
-    </svg>
-  );
-}
-
-function DownloadIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height="14"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-      width="14"
-    >
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" x2="12" y1="15" y2="3" />
-    </svg>
-  );
-}
-
-function DeleteIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height="14"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-      width="14"
-    >
-      <polyline points="3 6 5 6 21 6" />
-      <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-      <path d="M10 11v6" />
-      <path d="M14 11v6" />
-      <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-    </svg>
-  );
-}
-
-function EditIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      height="14"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-      width="14"
-    >
-      <path d="M12 20h9" />
-      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
-    </svg>
-  );
+  if (tier === 'Viral') return 'bg-primary/15 text-primary border-primary/30';
+  if (tier === 'Strong') return 'bg-secondary text-secondary-foreground border-border';
+  return 'bg-muted text-muted-foreground border-border';
 }
 
 function IconButton({
@@ -148,8 +63,8 @@ function IconButton({
       aria-label={label}
       className={`flex h-8 w-8 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
         danger
-          ? 'border-zinc-800 bg-zinc-800/80 text-rose-400 hover:border-rose-500/50 hover:bg-rose-500/10 hover:text-rose-300'
-          : 'border-zinc-800 bg-zinc-800/80 text-zinc-300 hover:border-emerald-500/50 hover:bg-emerald-500/10 hover:text-emerald-400'
+          ? 'border-border bg-card text-destructive hover:border-destructive/50 hover:bg-destructive/10'
+          : 'border-border bg-card text-muted-foreground hover:border-primary/50 hover:bg-primary/10 hover:text-primary'
       }`}
       disabled={disabled}
       onClick={onClick}
@@ -203,7 +118,6 @@ export function ClipCard({
     if (saved) setEditing(false);
   }
 
-  /** The top metadata + action buttons section */
   const topSection = (
     <>
       <div className="flex items-start justify-between gap-2">
@@ -211,7 +125,7 @@ export function ClipCard({
           <input
             aria-label={`Select ${clip.title} for merge`}
             checked={selected}
-            className="mt-1 h-4 w-4 cursor-pointer accent-emerald-500 disabled:cursor-not-allowed"
+            className="mt-1 h-4 w-4 cursor-pointer accent-primary disabled:cursor-not-allowed"
             disabled={busy}
             onChange={onToggleSelect}
             type="checkbox"
@@ -220,14 +134,14 @@ export function ClipCard({
             {number ? (
               <span
                 aria-label={`Clip number ${number}`}
-                className="mr-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[11px] font-bold text-zinc-950"
+                className="me-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-primary-foreground"
                 title={`Clip ${number} in the episode`}
               >
                 {number}
               </span>
             ) : null}
             <span
-              className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-bold ${badgeClass(clip, score)}`}
+              className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-bold border ${badgeClass(clip, score)}`}
               title="Estimated from duration, speech density and opening hook"
             >
               {clip.source === 'AI'
@@ -238,7 +152,7 @@ export function ClipCard({
               <input
                 aria-label={`Rename ${clip.title}`}
                 autoFocus
-                className="mt-1 block h-8 w-full rounded-md border border-emerald-500 bg-zinc-950 px-2 text-sm font-bold text-zinc-100 ring-1 ring-emerald-500/50"
+                className="mt-1 block h-8 w-full rounded-md border border-primary bg-background px-2 text-sm font-bold text-foreground ring-1 ring-primary/50"
                 dir="auto"
                 disabled={saving}
                 maxLength={255}
@@ -248,15 +162,13 @@ export function ClipCard({
                   if (e.key === 'Enter') void commit();
                   if (e.key === 'Escape') setEditing(false);
                 }}
-                style={cairo}
                 value={draft}
               />
             ) : (
               <button
-                className="mt-1.5 block w-full min-w-0 text-start text-[15px] font-bold leading-snug text-zinc-100 hover:text-emerald-400 transition-colors"
+                className="mt-1.5 block w-full min-w-0 text-start text-[15px] font-bold leading-snug text-foreground hover:text-primary transition-colors"
                 dir="auto"
                 onClick={onPreview}
-                style={cairo}
                 type="button"
               >
                 {clip.title}
@@ -269,32 +181,32 @@ export function ClipCard({
           label="Edit"
           onClick={startEditing}
         >
-          <EditIcon />
+          <EditIcon className="w-3.5 h-3.5" />
         </IconButton>
       </div>
 
       <div className="mt-1 flex items-center justify-between text-xs">
         <button
-          className="rounded-md border border-zinc-700/60 bg-zinc-800/80 px-1.5 py-0.5 font-mono text-emerald-400 hover:border-emerald-500/40 hover:bg-zinc-700/80 transition-colors"
+          className="rounded-md border border-border bg-muted/50 px-1.5 py-0.5 font-mono text-primary hover:border-primary/40 hover:bg-muted transition-colors"
           onClick={onSeek}
           type="button"
         >
           {formatClock(clip.startSec)} - {formatClock(clip.endSec)}
         </button>
-        <span className="text-zinc-400">
+        <span className="text-muted-foreground">
           {formatClipLength(clip.startSec, clip.endSec)}
         </span>
       </div>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         <IconButton disabled={busy} label="Trim" onClick={onTrim}>
-          <TrimIcon />
+          <ScissorsIcon className="w-3.5 h-3.5" />
         </IconButton>
         <IconButton disabled={busy} label="Download" onClick={onDownload}>
-          <DownloadIcon />
+          <DownloadIcon className="w-3.5 h-3.5" />
         </IconButton>
         <IconButton danger disabled={busy} label="Delete" onClick={onDelete}>
-          <DeleteIcon />
+          <TrashIcon className="w-3.5 h-3.5" />
         </IconButton>
       </div>
     </>
@@ -302,27 +214,25 @@ export function ClipCard({
 
   return (
     <li
-      className={`rounded-2xl border p-3.5 transition-all duration-200 ${active ? 'border-emerald-500/80 bg-zinc-900/90 shadow-[0_0_0_2px_rgba(16,185,129,0.25)]' : 'border-zinc-800/90 bg-zinc-900/60 hover:border-zinc-700 hover:bg-zinc-900/80 shadow-md'}`}
+      className={`rounded-2xl border p-3.5 transition-all duration-200 ${
+        active
+          ? 'border-primary bg-card ring-2 ring-primary/25 shadow-sm'
+          : 'border-border bg-card hover:border-border/80 shadow-sm'
+      }`}
     >
       {isPortrait ? (
-        /* ── 9:16 portrait layout: thumbnail left | info+controls right ── */
         <div className="flex gap-3">
-          {/* Left: 9:16 thumbnail — fixed ratio, never stretches with the card */}
           <div className="w-[7.5rem] shrink-0 self-start sm:w-36">
             <div className="aspect-[9/16] w-full overflow-hidden rounded-xl">
               {reel.thumbnail}
             </div>
           </div>
-          {/* Right: top info + bottom reel controls */}
           <div className="flex min-w-0 flex-1 flex-col justify-between gap-2">
             <div>{topSection}</div>
-            <div className="border-t border-zinc-800/80 pt-2">
-              {reel.controls}
-            </div>
+            <div className="border-t border-border pt-2">{reel.controls}</div>
           </div>
         </div>
       ) : (
-        /* ── 16:9 layout: top info, thumbnail centered in the middle, then controls below ── */
         <div className="flex flex-col gap-2.5">
           {topSection}
           {reel != null && (
@@ -330,9 +240,7 @@ export function ClipCard({
               <div className="my-1 flex w-full justify-center overflow-hidden rounded-xl">
                 <div className="w-full max-w-md">{reel.thumbnail}</div>
               </div>
-              <div className="border-t border-zinc-800/80 pt-2">
-                {reel.controls}
-              </div>
+              <div className="border-t border-border pt-2">{reel.controls}</div>
             </>
           )}
         </div>

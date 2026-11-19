@@ -161,6 +161,21 @@ export function DrawerTitle({
   );
 }
 
+export function DrawerFooter({
+  className = '',
+  children,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={`flex items-center justify-end gap-2 p-4 border-t border-border ${className}`}
+      {...props}
+    >
+      {children}
+    </div>
+  );
+}
+
 export function DrawerClose({
   asChild = false,
   children,

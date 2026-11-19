@@ -107,6 +107,34 @@ const librarySummarySchema = libraryVideoSchema.extend({
 
 const librarySummariesSchema = z.array(librarySummarySchema);
 
+export const pipelineStageSchema = z.object({
+  stage: z.enum(['INGEST', 'TRANSCRIBE', 'SEGMENT', 'ANALYZE']),
+  status: z.string(),
+  progress: z.number().min(0).max(100),
+  errorCode: z.string().nullable().optional(),
+  jobId: z.string().nullable().optional(),
+});
+export type PipelineStage = z.infer<typeof pipelineStageSchema>;
+
+export const videoDetailsSchema = libraryVideoSchema.extend({
+  contentType: z.enum(['SOLO', 'PODCAST']).nullable().optional(),
+  language: z.string().nullable().optional(),
+  autoClips: z.boolean().optional(),
+  failedStage: z.string().nullable().optional(),
+  failureReason: z.string().nullable().optional(),
+  pipeline: z.array(pipelineStageSchema).default([]),
+  mediaAssets: z
+    .array(
+      z.object({
+        kind: z.string(),
+        storageKey: z.string(),
+      }),
+    )
+    .optional()
+    .default([]),
+});
+export type VideoDetails = z.infer<typeof videoDetailsSchema>;
+
 const clipSchema = z.object({
   id: z.string(),
   videoId: z.string(),
@@ -406,6 +434,8 @@ export const api = {
   logout: () => request('/auth/logout', z.undefined(), { method: 'POST' }),
   getVideoUploadConstraints: () =>
     request('/videos/upload-constraints', uploadConstraintsSchema),
+  getVideo: (videoId: string) =>
+    request(`/videos/${videoId}`, videoDetailsSchema),
   getVideos: () => request('/videos', libraryVideosSchema),
   getLibrary: () => request('/videos/library', librarySummariesSchema),
   createVideo: (title: string, options: CreateVideoOptions = {}) =>
@@ -579,6 +609,14 @@ export const api = {
     }),
   stopVideoRenders: (videoId: string) =>
     request(`/videos/${videoId}/renders/stop`, clipRendersSchema, {
+      method: 'POST',
+    }),
+  retryJob: (jobId: string) =>
+    request(`/jobs/${jobId}/retry`, z.unknown(), {
+      method: 'POST',
+    }),
+  cancelJob: (jobId: string) =>
+    request(`/jobs/${jobId}/cancel`, z.unknown(), {
       method: 'POST',
     }),
 };

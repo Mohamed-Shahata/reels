@@ -460,6 +460,7 @@ export class VideosService {
           status: stageJob.status,
           progress: stageJob.progress,
           errorCode: stageJob.errorCode,
+          jobId: stageJob.id,
         };
       }
       return {
@@ -467,6 +468,7 @@ export class VideosService {
         status: 'PENDING',
         progress: 0,
         errorCode: null,
+        jobId: null,
       };
     });
 

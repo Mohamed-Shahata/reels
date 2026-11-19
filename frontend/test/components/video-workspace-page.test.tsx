@@ -1,5 +1,5 @@
 import VideoWorkspacePage from '@/app/videos/[id]/page';
-import { api, type Clip, type LibraryVideo, type Transcript } from '@/lib/api';
+import { api, type Clip, type VideoDetails, type Transcript } from '@/lib/api';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 let mockSearch = '';
@@ -15,7 +15,7 @@ jest.mock('@/components/auth/auth-provider', () => ({
 }));
 
 jest.mock('@/components/layout/app-header', () => ({
-  AppHeader: () => null,
+  AppHeader: () => <div data-testid="app-header" />,
 }));
 
 jest.mock('@/lib/api', () => {
@@ -23,21 +23,26 @@ jest.mock('@/lib/api', () => {
   return {
     ...actual,
     api: {
+      getVideo: jest.fn(),
       getVideos: jest.fn(),
       getClips: jest.fn(),
       getVideoPlaybackUrl: jest.fn(),
       getVideoProcessingJobs: jest.fn(),
       getVideoTranscript: jest.fn(),
+      getVideoReframePlan: jest.fn(),
       getUsage: jest.fn(),
       getVideoRenders: jest.fn(),
-      getSubtitleStyleCatalog: jest.fn(),
-      createClip: jest.fn(),
       updateClip: jest.fn(),
+      deleteClip: jest.fn(),
+      retryJob: jest.fn(),
+      getTranscriptExportUrl: jest.fn(
+        (id: string, format: string) => `/api/v1/videos/${id}/transcript.${format}`,
+      ),
     },
   };
 });
 
-const video: LibraryVideo = {
+const video: VideoDetails = {
   id: 'video-1',
   title: 'Episode one',
   cloudinaryId: null,
@@ -45,6 +50,13 @@ const video: LibraryVideo = {
   sizeBytes: null,
   status: 'READY',
   createdAt: '2026-09-29T10:00:00.000Z',
+  pipeline: [
+    { stage: 'INGEST', status: 'COMPLETED', progress: 100, errorCode: null, jobId: 'j1' },
+    { stage: 'TRANSCRIBE', status: 'COMPLETED', progress: 100, errorCode: null, jobId: 'j2' },
+    { stage: 'SEGMENT', status: 'COMPLETED', progress: 100, errorCode: null, jobId: 'j3' },
+    { stage: 'ANALYZE', status: 'COMPLETED', progress: 100, errorCode: null, jobId: 'j4' },
+  ],
+  mediaAssets: [],
 };
 
 const aiClip: Clip = {
@@ -66,9 +78,7 @@ const transcript: Transcript = {
 };
 
 beforeAll(() => {
-  window.HTMLMediaElement.prototype.play = jest
-    .fn()
-    .mockResolvedValue(undefined);
+  window.HTMLMediaElement.prototype.play = jest.fn().mockResolvedValue(undefined);
   window.HTMLMediaElement.prototype.pause = jest.fn();
   window.Element.prototype.scrollIntoView = jest.fn();
 });
@@ -76,166 +86,126 @@ beforeAll(() => {
 beforeEach(() => {
   mockSearch = '';
   window.history.replaceState(null, '', '/');
+  jest.mocked(api.getVideo).mockResolvedValue(video);
   jest.mocked(api.getVideos).mockResolvedValue([video]);
   jest.mocked(api.getClips).mockResolvedValue([aiClip]);
   jest
     .mocked(api.getVideoPlaybackUrl)
     .mockResolvedValue({ url: 'https://cdn.test/episode.mp4' });
-  jest.mocked(api.getVideoProcessingJobs).mockResolvedValue([]);
   jest.mocked(api.getVideoTranscript).mockResolvedValue(transcript);
-  jest.mocked(api.getUsage).mockRejectedValue(new Error('no usage'));
+  jest.mocked(api.getVideoReframePlan).mockResolvedValue({
+    id: 'rf-1',
+    videoId: 'video-1',
+    version: 1,
+    contentType: 'SOLO',
+    faces: [],
+    speakerTurns: [],
+    createdAt: '2026-09-29T10:00:00.000Z',
+    updatedAt: '2026-09-29T10:00:00.000Z',
+  });
   jest.mocked(api.getVideoRenders).mockResolvedValue([]);
-  jest
-    .mocked(api.getSubtitleStyleCatalog)
-    .mockRejectedValue(new Error('no catalog'));
+  window.open = jest.fn();
 });
 
 async function renderWorkspace() {
   render(<VideoWorkspacePage />);
-  await screen.findByRole('tab', { name: /Clips & Export/ });
+  await screen.findByText('Episode one');
 }
 
-describe('video workspace tabs', () => {
-  it('opens on Clips & Export with a single stage and no separate trimmer link', async () => {
+describe('VideoWorkspacePage', () => {
+  it('renders header, video title, pipeline stepper, and default clips tab', async () => {
     await renderWorkspace();
 
-    expect(screen.getByRole('tab', { name: /Clips & Export/ })).toHaveAttribute(
+    expect(screen.getByTestId('app-header')).toBeInTheDocument();
+    expect(screen.getByText('Episode one')).toBeInTheDocument();
+
+    // Tabs
+    expect(screen.getByRole('tab', { name: /Clips/i })).toHaveAttribute(
       'aria-selected',
       'true',
     );
-    expect(screen.getByRole('tab', { name: /Trim/ })).toHaveAttribute(
+    expect(screen.getByRole('tab', { name: /Transcript/i })).toHaveAttribute(
       'aria-selected',
       'false',
     );
-    expect(screen.getAllByLabelText('Video stage')).toHaveLength(1);
-    expect(screen.queryByText(/Timeline & Trimmer/)).not.toBeInTheDocument();
-    // The Trim panel is hidden until its tab is chosen.
-    expect(
-      screen.queryByRole('tabpanel', { name: /Trim/ }),
-    ).not.toBeInTheDocument();
+
+    // Clips list
+    expect(await screen.findByText('Hook one')).toBeInTheDocument();
   });
 
-  it('opens the Trim tab from a deep link', async () => {
-    mockSearch = 'tab=trim';
+  it('switches between Clips and Transcript tabs', async () => {
     await renderWorkspace();
 
-    expect(screen.getByRole('tab', { name: /Trim/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    expect(screen.getByRole('tabpanel', { name: /Trim/ })).toBeInTheDocument();
+    const transcriptTab = screen.getByRole('tab', { name: /Transcript/i });
+    fireEvent.click(transcriptTab);
+
+    expect(transcriptTab).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByText('A sentence')).toBeInTheDocument();
   });
 
-  it('opens the subtitle style editor as a popup from Clips & Export', async () => {
-    await renderWorkspace();
-
-    expect(screen.queryByRole('tab', { name: /Style Subtitles/ })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Subtitle style' }));
-
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Style Subtitles',
-    });
-    expect(dialog).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('has no Transcript tab and offers transcript downloads instead', async () => {
+  it('opens Transcript tab directly from search params deep link', async () => {
     mockSearch = 'tab=transcript';
     await renderWorkspace();
 
-    expect(screen.queryByRole('tab', { name: /^Transcript/ })).toBeNull();
-    expect(screen.getByRole('tab', { name: /Clips & Export/ })).toHaveAttribute(
+    expect(screen.getByRole('tab', { name: /Transcript/i })).toHaveAttribute(
       'aria-selected',
       'true',
     );
+    expect(await screen.findByText('A sentence')).toBeInTheDocument();
+  });
+
+  it('offers transcript downloads in SRT, VTT, and TXT formats', async () => {
+    mockSearch = 'tab=transcript';
+    await renderWorkspace();
+
     for (const format of ['SRT', 'VTT', 'TXT']) {
-      expect(
-        screen.getByRole('button', { name: `Download transcript ${format}` }),
-      ).toBeInTheDocument();
+      const button = screen.getByRole('button', {
+        name: `Download transcript ${format}`,
+      });
+      expect(button).toBeInTheDocument();
+      fireEvent.click(button);
+      expect(window.open).toHaveBeenCalledWith(
+        `/api/v1/videos/video-1/transcript.${format.toLowerCase()}`,
+        '_blank',
+      );
     }
   });
 
-  it('offers Extract Transcript on the clips tab while there is no transcript', async () => {
-    jest.mocked(api.getVideoTranscript).mockRejectedValue(new Error('none'));
-    await renderWorkspace();
-
-    expect(
-      await screen.findByRole('button', { name: 'Extract Transcript' }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /Clips & Export/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-  });
-
-  it('loads a clip into the trimmer from the clips list', async () => {
-    await renderWorkspace();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Trim' }));
-
-    expect(screen.getByRole('tab', { name: /Trim/ })).toHaveAttribute(
-      'aria-selected',
-      'true',
-    );
-    expect(screen.getByLabelText('Start timecode')).toHaveValue('00:10');
-    expect(screen.getByLabelText('End timecode')).toHaveValue('00:40');
-    expect(screen.getByLabelText(/Clip title/)).toHaveValue('Hook one');
-    expect(window.location.search).toBe('?tab=trim');
-  });
-
-  it('shares saved clips between both tabs', async () => {
-    jest.mocked(api.createClip).mockResolvedValue({
-      ...aiClip,
-      id: 'clip-2',
-      title: 'Fresh cut',
-      startSec: 100,
-      endSec: 130,
-      source: 'MANUAL',
-    });
-    await renderWorkspace();
-
-    fireEvent.click(screen.getByRole('tab', { name: /Trim/ }));
-    fireEvent.change(screen.getByLabelText(/Clip title/), {
-      target: { value: 'Fresh cut' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Save clip' }));
-
-    await waitFor(() =>
-      expect(api.createClip).toHaveBeenCalledWith('video-1', {
-        title: 'Fresh cut',
-        startSec: 10,
-        endSec: 40,
-      }),
-    );
-
-    fireEvent.click(screen.getByRole('tab', { name: /Clips & Export/ }));
-    expect(
-      await screen.findByRole('button', { name: 'Fresh cut' }),
-    ).toBeInTheDocument();
-    expect(window.location.search).toBe('');
-  });
-
-  it('renames a clip from the clips list', async () => {
+  it('renames a clip from the clip card', async () => {
     jest.mocked(api.updateClip).mockResolvedValue({
       ...aiClip,
-      title: 'Better title',
+      title: 'Renamed hook',
     });
+
     await renderWorkspace();
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const input = screen.getByLabelText('Rename Hook one');
-    fireEvent.change(input, { target: { value: 'Better title' } });
+    fireEvent.change(input, { target: { value: 'Renamed hook' } });
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() =>
       expect(api.updateClip).toHaveBeenCalledWith('clip-1', {
-        title: 'Better title',
+        title: 'Renamed hook',
       }),
     );
-    expect(
-      await screen.findByRole('button', { name: 'Better title' }),
-    ).toBeInTheDocument();
+  });
+
+  it('opens clip editor drawer when Trim button is clicked', async () => {
+    await renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Trim' }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Hook one')).toBeInTheDocument();
+  });
+
+  it('opens export dialog when Download button is clicked', async () => {
+    await renderWorkspace();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Start Render/i })).toBeInTheDocument();
   });
 });

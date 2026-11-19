@@ -820,24 +820,28 @@ describe('VideosService language options', () => {
         status: 'COMPLETED',
         progress: 100,
         errorCode: null,
+        jobId: 'j-ingest',
       });
       expect(res.pipeline[1]).toEqual({
         stage: 'TRANSCRIBE',
         status: 'RUNNING',
         progress: 45,
         errorCode: null,
+        jobId: 'j-transcribe',
       });
       expect(res.pipeline[2]).toEqual({
         stage: 'SEGMENT',
         status: 'PENDING',
         progress: 0,
         errorCode: null,
+        jobId: null,
       });
       expect(res.pipeline[3]).toEqual({
         stage: 'ANALYZE',
         status: 'PENDING',
         progress: 0,
         errorCode: null,
+        jobId: null,
       });
     });
 
