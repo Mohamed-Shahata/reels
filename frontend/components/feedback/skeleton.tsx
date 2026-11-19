@@ -2,7 +2,7 @@ export function Skeleton({ className = '' }: { className?: string }) {
   return (
     <div
       aria-hidden="true"
-      className={`animate-pulse rounded-md bg-[#e3ece8] motion-reduce:animate-none ${className}`}
+      className={`animate-pulse rounded-md bg-muted motion-reduce:animate-none ${className}`}
     />
   );
 }
@@ -11,7 +11,7 @@ export function VideoCardSkeleton() {
   return (
     <li
       aria-hidden="true"
-      className="overflow-hidden rounded-xl border border-[#e2eae6] bg-white"
+      className="overflow-hidden rounded-xl border border-border bg-card"
     >
       <Skeleton className="aspect-video w-full rounded-none" />
       <div className="space-y-3 p-4">
@@ -47,10 +47,10 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-dashed border-[#c5d3cd] bg-white px-6 py-14 text-center">
+    <div className="rounded-xl border border-dashed border-border bg-card px-6 py-14 text-center">
       <p className="text-base font-semibold">{title}</p>
       {description ? (
-        <p className="mt-1 text-sm text-[#5d6d68]">{description}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
       ) : null}
       {action ? <div className="mt-5">{action}</div> : null}
     </div>
@@ -61,7 +61,7 @@ function ClipRowSkeleton() {
   return (
     <li
       aria-hidden="true"
-      className="flex gap-3 rounded-2xl border border-[#e2eae6] bg-[#fafcfb] p-3.5"
+      className="flex gap-3 rounded-2xl border border-border bg-card/50 p-3.5"
     >
       <Skeleton className="aspect-[9/16] w-28 shrink-0 rounded-lg sm:w-36" />
       <div className="flex min-w-0 flex-1 flex-col justify-between gap-3">
@@ -88,13 +88,13 @@ export function WorkspaceSkeleton() {
   return (
     <div aria-busy="true" aria-label="Loading video workspace" role="status">
       <div aria-hidden="true">
-        <div className="mt-5 flex gap-1 rounded-2xl border border-[#e2eae6] bg-white p-1.5 shadow-[var(--shadow-surface)] sm:inline-flex">
+        <div className="mt-5 flex gap-1 rounded-2xl border border-border bg-card p-1.5 shadow-sm sm:inline-flex">
           <Skeleton className="h-12 w-36 rounded-xl" />
           <Skeleton className="h-12 w-36 rounded-xl" />
         </div>
 
         <div className="mt-5 grid items-start gap-5 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-          <div className="rounded-2xl border border-[#e2eae6] bg-white p-4 shadow-[var(--shadow-surface)]">
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
             <div className="flex items-center justify-between gap-2">
               <div className="space-y-2">
                 <Skeleton className="h-4 w-28" />
@@ -113,7 +113,7 @@ export function WorkspaceSkeleton() {
           </div>
 
           <div className="grid gap-4">
-            <div className="rounded-2xl border border-[#e2eae6] bg-white px-4 py-3 shadow-[var(--shadow-surface)]">
+            <div className="rounded-2xl border border-border bg-card px-4 py-3 shadow-sm">
               <div className="flex items-center justify-between gap-3">
                 <Skeleton className="h-5 w-32" />
                 <div className="flex gap-2">
@@ -123,8 +123,8 @@ export function WorkspaceSkeleton() {
                 </div>
               </div>
             </div>
-            <div className="rounded-2xl border border-[#e2eae6] bg-white p-4 shadow-[var(--shadow-surface)]">
-              <div className="flex items-center justify-between gap-2">
+            <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
                 <Skeleton className="h-5 w-36" />
                 <Skeleton className="h-8 w-28 rounded-lg" />
               </div>

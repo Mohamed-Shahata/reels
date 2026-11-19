@@ -17,7 +17,7 @@ export function CopyUrlButton() {
 
   return (
     <button
-      className="font-mono text-xs font-semibold text-[#0f766e] hover:underline"
+      className="font-mono text-xs font-semibold text-primary hover:underline"
       onClick={() => void copy()}
       type="button"
     >

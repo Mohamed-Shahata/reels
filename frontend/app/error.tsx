@@ -3,6 +3,7 @@
 import { AlertBanner } from '@/components/feedback';
 import Link from 'next/link';
 import { useEffect } from 'react';
+import { Button } from '@/components/ui/button';
 
 export default function ErrorPage({
   error,
@@ -16,20 +17,16 @@ export default function ErrorPage({
   }, [error]);
 
   return (
-    <main className="flex flex-1 items-center justify-center bg-[#eefaf5] px-4 py-14">
-      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-[0_8px_30px_rgba(15,118,110,0.08)]">
+    <main className="flex flex-1 items-center justify-center bg-background px-4 py-14">
+      <div className="w-full max-w-xl rounded-2xl border border-border bg-card p-6 shadow-lg">
         <AlertBanner
           actions={
             <>
-              <button
-                className="h-9 rounded-lg bg-[#0f766e] px-4 text-sm font-semibold text-white hover:bg-[#0b5a54]"
-                onClick={reset}
-                type="button"
-              >
+              <Button onClick={reset} size="sm" variant="primary">
                 Try again
-              </button>
+              </Button>
               <Link
-                className="inline-flex h-9 items-center rounded-lg border border-[#d5dcd8] bg-white px-4 text-sm font-medium text-[#263532]"
+                className="inline-flex h-9 items-center rounded-lg border border-input bg-card px-4 text-sm font-medium text-foreground hover:bg-muted"
                 href="/"
               >
                 Back to workspace
@@ -43,7 +40,7 @@ export default function ErrorPage({
           support if it keeps happening.
         </AlertBanner>
         <p
-          className="mt-4 text-right font-[family-name:var(--font-cairo)] text-sm text-[#8f2f1f]"
+          className="mt-4 text-end font-[family-name:var(--font-cairo)] text-sm text-destructive"
           dir="rtl"
           lang="ar"
         >

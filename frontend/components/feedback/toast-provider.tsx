@@ -37,10 +37,10 @@ const ToastContext = createContext<ToastContextValue>({
 });
 
 const ACCENT: Record<AlertVariant, string> = {
-  success: 'bg-[#0f766e]',
-  error: 'bg-[#b42318]',
-  warning: 'bg-[#c9811a]',
-  info: 'bg-[#2f7f9a]',
+  success: 'bg-primary',
+  error: 'bg-destructive',
+  warning: 'bg-amber-500',
+  info: 'bg-sky-500',
 };
 
 const MAX_VISIBLE = 4;
@@ -91,24 +91,24 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       >
         {toasts.map((toast) => (
           <div
-            className="pointer-events-auto flex overflow-hidden rounded-lg border border-[#dfe6e2] bg-white shadow-lg"
+            className="pointer-events-auto flex overflow-hidden rounded-lg border border-border bg-card shadow-lg"
             key={toast.id}
             role={toast.variant === 'error' ? 'alert' : 'status'}
           >
             <span className={`w-1 shrink-0 ${ACCENT[toast.variant]}`} />
             <div className="min-w-0 flex-1 px-3 py-2.5">
-              <p className="text-sm font-semibold text-[#172321]">
+              <p className="text-sm font-semibold text-foreground">
                 {toast.title}
               </p>
               {toast.description ? (
-                <p className="mt-0.5 text-xs text-[#5d6d68]" dir="auto">
+                <p className="mt-0.5 text-xs text-muted-foreground" dir="auto">
                   {toast.description}
                 </p>
               ) : null}
             </div>
             <button
               aria-label="Dismiss notification"
-              className="m-1.5 h-6 w-6 shrink-0 rounded text-base leading-none text-[#5d6d68] hover:bg-[#f2f6f4]"
+              className="m-1.5 h-6 w-6 shrink-0 rounded text-base leading-none text-muted-foreground hover:bg-muted"
               onClick={() => dismiss(toast.id)}
               type="button"
             >

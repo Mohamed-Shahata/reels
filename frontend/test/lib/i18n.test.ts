@@ -41,11 +41,11 @@ describe('i18n translation symmetry and validity', () => {
   });
 
   it('contains no empty translation strings', () => {
-    for (const { path, value } of enEntries) {
-      expect(value.trim().length, `empty string at ${path}`).toBeGreaterThan(0);
+    for (const entry of enEntries) {
+      expect(entry.value.trim().length).toBeGreaterThan(0);
     }
-    for (const { path, value } of arEntries) {
-      expect(value.trim().length, `empty string at ${path}`).toBeGreaterThan(0);
+    for (const entry of arEntries) {
+      expect(entry.value.trim().length).toBeGreaterThan(0);
     }
   });
 
