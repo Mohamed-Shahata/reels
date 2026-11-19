@@ -11,7 +11,8 @@ import amqp, {
 } from 'amqp-connection-manager';
 import type { ConfirmChannel, ConsumeMessage, Options } from 'amqplib';
 import type { Env } from '../config/env.schema';
-import { REELS_EXCHANGES, REELS_QUEUES, RETRY_TIERS } from './rabbit.constants';
+import { REELS_EXCHANGES, REELS_QUEUES } from './rabbit.constants';
+import { assertRabbitTopology } from './rabbit-topology';
 
 export type MessageHandler<T = unknown> = (
   msg: ConsumeMessage,
@@ -19,6 +20,19 @@ export type MessageHandler<T = unknown> = (
   ack: () => void,
   nack: (requeue?: boolean) => void,
 ) => Promise<void>;
+
+export interface QueueInspection {
+  queue: string;
+  isDlq: boolean;
+  messageCount: number;
+  consumerCount: number;
+}
+
+export interface QueuesReport {
+  queues: QueueInspection[];
+  totalDeadLetters: number;
+  alert: boolean;
+}
 
 @Injectable()
 export class RabbitService implements OnModuleInit, OnModuleDestroy {
@@ -92,50 +106,62 @@ export class RabbitService implements OnModuleInit, OnModuleDestroy {
   }
 
   async assertTopology(channel: ConfirmChannel): Promise<void> {
-    // 1. Assert Exchanges
-    await channel.assertExchange(REELS_EXCHANGES.WORK, 'direct', {
-      durable: true,
-    });
-    await channel.assertExchange(REELS_EXCHANGES.RETRY, 'direct', {
-      durable: true,
-    });
-    await channel.assertExchange(REELS_EXCHANGES.DLX, 'direct', {
-      durable: true,
-    });
+    await assertRabbitTopology(channel);
+    this.logger.log('RabbitMQ topology asserted successfully');
+  }
 
-    // 2. Assert Queues per work type
-    for (const q of REELS_QUEUES) {
-      // Main work queue
-      await channel.assertQueue(q, {
-        durable: true,
-        arguments: {
-          'x-dead-letter-exchange': REELS_EXCHANGES.DLX,
-          'x-dead-letter-routing-key': `${q}.dead`,
-        },
-      });
-      await channel.bindQueue(q, REELS_EXCHANGES.WORK, q);
+  isConnected(): boolean {
+    return this.connection?.isConnected() ?? false;
+  }
 
-      // Retry queues per tier
-      for (const tier of RETRY_TIERS) {
-        const retryQueue = `${q}.retry.${tier.name}`;
-        await channel.assertQueue(retryQueue, {
-          durable: true,
-          arguments: {
-            'x-message-ttl': tier.ttlMs,
-            'x-dead-letter-exchange': REELS_EXCHANGES.WORK,
-            'x-dead-letter-routing-key': q,
-          },
-        });
-        await channel.bindQueue(retryQueue, REELS_EXCHANGES.RETRY, retryQueue);
-      }
+  async checkHealth(): Promise<boolean> {
+    return this.isConnected();
+  }
 
-      // Dead Letter Queue (DLQ)
-      const dlq = `${q}.dlq`;
-      await channel.assertQueue(dlq, { durable: true });
-      await channel.bindQueue(dlq, REELS_EXCHANGES.DLX, `${q}.dead`);
+  async inspectQueues(): Promise<QueuesReport> {
+    const inspections: QueueInspection[] = [];
+    let totalDeadLetters = 0;
+
+    if (!this.publishChannel) {
+      return { queues: [], totalDeadLetters: 0, alert: false };
     }
 
-    this.logger.log('RabbitMQ topology asserted successfully');
+    for (const q of REELS_QUEUES) {
+      try {
+        const info = await this.publishChannel.checkQueue(q);
+        inspections.push({
+          queue: q,
+          isDlq: false,
+          messageCount: info.messageCount,
+          consumerCount: info.consumerCount,
+        });
+      } catch (err) {
+        this.logger.warn(`Could not check queue ${q}: ${(err as Error).message}`);
+      }
+
+      const dlq = `${q}.dlq`;
+      try {
+        const dlqInfo = await this.publishChannel.checkQueue(dlq);
+        inspections.push({
+          queue: dlq,
+          isDlq: true,
+          messageCount: dlqInfo.messageCount,
+          consumerCount: dlqInfo.consumerCount,
+        });
+        totalDeadLetters += dlqInfo.messageCount;
+      } catch (err) {
+        this.logger.warn(`Could not check DLQ ${dlq}: ${(err as Error).message}`);
+      }
+    }
+
+    const alert = totalDeadLetters > 0;
+    if (alert) {
+      this.logger.warn(
+        `[DLQ_ALERT] Dead letter queue has pending messages! Total: ${totalDeadLetters}`,
+      );
+    }
+
+    return { queues: inspections, totalDeadLetters, alert };
   }
 
   async publish(
@@ -174,23 +200,19 @@ export class RabbitService implements OnModuleInit, OnModuleDestroy {
     const prefetch = options.prefetch ?? 1;
 
     const consumerChannel = this.connection.createChannel({
+      json: true,
       setup: async (channel: ConfirmChannel) => {
         await channel.prefetch(prefetch);
         await channel.consume(
           queue,
-          (msg: ConsumeMessage | null) => {
+          (msg) => {
+            if (!msg) return;
             void (async () => {
-              if (!msg) return;
-
               let parsed: T;
               try {
                 parsed = JSON.parse(msg.content.toString('utf-8')) as T;
-              } catch (err) {
-                this.logger.error(
-                  `Failed to parse message from queue ${queue}: ${(err as Error).message}`,
-                );
-                channel.nack(msg, false, false); // Send unparseable message to DLX/discard
-                return;
+              } catch {
+                parsed = msg.content as unknown as T;
               }
 
               const ack = () => channel.ack(msg);

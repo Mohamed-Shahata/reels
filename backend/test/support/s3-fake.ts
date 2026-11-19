@@ -90,6 +90,10 @@ export class S3Fake {
     };
   }
 
+  async checkHealth(): Promise<boolean> {
+    return true;
+  }
+
   async deleteObject(key: string): Promise<void> {
     this.objects.delete(key);
   }

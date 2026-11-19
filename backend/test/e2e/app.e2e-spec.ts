@@ -9,7 +9,9 @@ import { configureApp } from '../../src/app.setup';
 import type { ErrorResponseBody } from '../../src/common/filters/all-exceptions.filter';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { RabbitService } from '../../src/rabbit/rabbit.service';
+import { S3StorageService } from '../../src/storage/s3-storage.service';
 import { createRabbitFake } from '../support/rabbit-fake';
+import { createS3Fake } from '../support/s3-fake';
 
 class SampleDto {
   @IsEmail()
@@ -52,6 +54,8 @@ describe('API foundations (e2e)', () => {
       })
       .overrideProvider(RabbitService)
       .useValue(createRabbitFake())
+      .overrideProvider(S3StorageService)
+      .useValue(createS3Fake())
       .compile();
 
     app = moduleRef.createNestApplication();

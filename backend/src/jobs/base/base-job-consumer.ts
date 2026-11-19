@@ -131,6 +131,10 @@ export abstract class BaseJobConsumer<TPayload = unknown> {
     };
 
     try {
+      this.logStructured('log', 'job_started', {
+        jobId,
+        videoId: claimedJob.videoId,
+      });
       await this.logJobEvent(
         jobId,
         'INFO',
@@ -139,7 +143,11 @@ export abstract class BaseJobConsumer<TPayload = unknown> {
 
       // Check cancel before starting
       if (await ctx.isCancelled()) {
-        this.logger.log(`Job ${jobId} was cancelled before execution`);
+        this.logStructured('warn', 'job_cancelled', {
+          jobId,
+          videoId: claimedJob.videoId,
+          reason: 'Cancelled before execution',
+        });
         await this.logJobEvent(
           jobId,
           'WARN',
@@ -157,7 +165,11 @@ export abstract class BaseJobConsumer<TPayload = unknown> {
 
       // Check if job was cancelled during execution
       if (await ctx.isCancelled()) {
-        this.logger.log(`Job ${jobId} was cancelled during execution`);
+        this.logStructured('warn', 'job_cancelled', {
+          jobId,
+          videoId: claimedJob.videoId,
+          reason: 'Cancelled during execution',
+        });
         await this.logJobEvent(
           jobId,
           'WARN',
@@ -183,6 +195,10 @@ export abstract class BaseJobConsumer<TPayload = unknown> {
         await this.updateVideoStatus(claimedJob.videoId);
       }
 
+      this.logStructured('log', 'job_completed', {
+        jobId,
+        videoId: claimedJob.videoId,
+      });
       await this.logJobEvent(jobId, 'INFO', 'Job completed successfully');
       ack();
     } catch (err) {
@@ -310,6 +326,34 @@ export abstract class BaseJobConsumer<TPayload = unknown> {
     }
   }
 
+  protected logStructured(
+    level: 'log' | 'warn' | 'error',
+    event: string,
+    meta: {
+      jobId: string;
+      videoId?: string | null;
+      stage?: string;
+      [key: string]: unknown;
+    },
+  ): void {
+    const record = {
+      timestamp: new Date().toISOString(),
+      event,
+      jobId: meta.jobId,
+      videoId: meta.videoId ?? null,
+      stage: meta.stage ?? this.queue,
+      workerId: this.workerId,
+      ...meta,
+    };
+    if (level === 'error') {
+      this.logger.error(JSON.stringify(record));
+    } else if (level === 'warn') {
+      this.logger.warn(JSON.stringify(record));
+    } else {
+      this.logger.log(JSON.stringify(record));
+    }
+  }
+
   private async handleJobError(
     job: ProcessingJob,
     err: unknown,
@@ -322,10 +366,15 @@ export abstract class BaseJobConsumer<TPayload = unknown> {
     const retryable = isJobRetryable(err);
     const nextAttempt = job.attempt + 1;
 
-    this.logger.error(
-      `Job ${job.id} failed: ${error.message} (code: ${errorCode}, retryable: ${retryable}, attempt: ${nextAttempt}/${job.maxAttempts})`,
-      error.stack,
-    );
+    this.logStructured('error', 'job_failed', {
+      jobId: job.id,
+      videoId: job.videoId,
+      error: error.message,
+      errorCode,
+      retryable,
+      attempt: nextAttempt,
+      maxAttempts: job.maxAttempts,
+    });
 
     if (retryable && nextAttempt < job.maxAttempts) {
       // Retry tier calculation (10s -> 1m -> 5m)

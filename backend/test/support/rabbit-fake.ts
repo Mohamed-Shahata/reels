@@ -32,6 +32,25 @@ export class RabbitFake {
     return this.connected;
   }
 
+  async checkHealth(): Promise<boolean> {
+    return this.connected;
+  }
+
+  async inspectQueues(): Promise<{
+    queues: { queue: string; isDlq: boolean; messageCount: number; consumerCount: number }[];
+    totalDeadLetters: number;
+    alert: boolean;
+  }> {
+    return {
+      queues: [
+        { queue: 'ingest', isDlq: false, messageCount: 0, consumerCount: 1 },
+        { queue: 'ingest.dlq', isDlq: true, messageCount: 0, consumerCount: 0 },
+      ],
+      totalDeadLetters: 0,
+      alert: false,
+    };
+  }
+
   async publish(
     exchange: string,
     routingKey: string,
