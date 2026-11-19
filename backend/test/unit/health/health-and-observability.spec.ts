@@ -21,7 +21,12 @@ describe('HealthController and AdminQueuesController (Observability)', () => {
       inspectQueues: jest.fn().mockResolvedValue({
         queues: [
           { queue: 'ingest', isDlq: false, messageCount: 0, consumerCount: 2 },
-          { queue: 'ingest.dlq', isDlq: true, messageCount: 0, consumerCount: 0 },
+          {
+            queue: 'ingest.dlq',
+            isDlq: true,
+            messageCount: 0,
+            consumerCount: 0,
+          },
         ],
         totalDeadLetters: 0,
         alert: false,
@@ -56,7 +61,9 @@ describe('HealthController and AdminQueuesController (Observability)', () => {
     });
 
     it('throws 503 ServiceUnavailableException when DB is down', async () => {
-      prismaMock.$queryRaw.mockRejectedValueOnce(new Error('Connection timeout'));
+      prismaMock.$queryRaw.mockRejectedValueOnce(
+        new Error('Connection timeout'),
+      );
       await expect(healthController.check()).rejects.toThrow(
         new ServiceUnavailableException('Database is unreachable'),
       );
@@ -89,7 +96,12 @@ describe('HealthController and AdminQueuesController (Observability)', () => {
       rabbitMock.inspectQueues.mockResolvedValueOnce({
         queues: [
           { queue: 'ingest', isDlq: false, messageCount: 5, consumerCount: 2 },
-          { queue: 'ingest.dlq', isDlq: true, messageCount: 3, consumerCount: 0 },
+          {
+            queue: 'ingest.dlq',
+            isDlq: true,
+            messageCount: 3,
+            consumerCount: 0,
+          },
         ],
         totalDeadLetters: 3,
         alert: true,

@@ -1,6 +1,7 @@
 import type { Response } from 'express';
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -133,6 +134,39 @@ export class VideosService {
     const maxSizeBytes = 5 * 1024 * 1024 * 1024; // 5 GB
     if (options.sizeBytes && options.sizeBytes > maxSizeBytes) {
       throw new BadRequestException('Video file exceeds maximum allowed size');
+    }
+
+    // 1. Check concurrent videos limit
+    const MAX_CONCURRENT_VIDEOS = 3;
+    const activeVideosCount =
+      (await this.prisma.video?.count?.({
+        where: {
+          userId,
+          status: { in: ['UPLOADING', 'PROCESSING'] },
+        },
+      })) ?? 0;
+    if (activeVideosCount >= MAX_CONCURRENT_VIDEOS) {
+      throw new ConflictException(
+        `Concurrent video processing limit reached (${MAX_CONCURRENT_VIDEOS}). Please wait for active videos to finish processing.`,
+      );
+    }
+
+    // 2. Check storage quota
+    const STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GB quota per user
+    const userAssets =
+      (await this.prisma.mediaAsset?.findMany?.({
+        where: { userId },
+        select: { sizeBytes: true },
+      })) ?? [];
+    const totalStorageUsed = userAssets.reduce(
+      (sum, a) => sum + (Number(a.sizeBytes) || 0),
+      0,
+    );
+    const incomingSize = options.sizeBytes || 0;
+    if (totalStorageUsed + incomingSize > STORAGE_QUOTA_BYTES) {
+      throw new ConflictException(
+        `Storage quota exceeded. Used ${Math.round(totalStorageUsed / (1024 * 1024))}MB of ${Math.round(STORAGE_QUOTA_BYTES / (1024 * 1024))}MB. Delete older videos or renders to free up storage.`,
+      );
     }
 
     const video = await this.prisma.video.create({

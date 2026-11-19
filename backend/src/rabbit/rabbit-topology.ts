@@ -1,7 +1,9 @@
 import type { ConfirmChannel } from 'amqplib';
 import { REELS_EXCHANGES, REELS_QUEUES, RETRY_TIERS } from './rabbit.constants';
 
-export async function assertRabbitTopology(channel: ConfirmChannel): Promise<void> {
+export async function assertRabbitTopology(
+  channel: ConfirmChannel,
+): Promise<void> {
   // 1. Assert Exchanges
   await channel.assertExchange(REELS_EXCHANGES.WORK, 'direct', {
     durable: true,

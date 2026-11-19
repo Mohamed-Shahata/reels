@@ -165,6 +165,23 @@ export class RendersService {
         'Subtitle edits can only be set when subtitles are enabled',
       );
     }
+
+    const MAX_CONCURRENT_RENDERS = 2;
+    const activeRendersCount =
+      (await this.prisma.clipRender?.count?.({
+        where: {
+          clip: { video: { userId } },
+          processingJob: {
+            status: { in: ['QUEUED', 'RUNNING'] },
+          },
+        },
+      })) ?? 0;
+    if (activeRendersCount >= MAX_CONCURRENT_RENDERS) {
+      throw new ConflictException(
+        `Concurrent render limit reached (${MAX_CONCURRENT_RENDERS}). Please wait for active renders to finish.`,
+      );
+    }
+
     const subtitleStyle = this.resolveStyle(renderDto);
     const clip = await this.prisma.clip.findFirst({
       where: { id: clipId, video: { is: { userId } } },

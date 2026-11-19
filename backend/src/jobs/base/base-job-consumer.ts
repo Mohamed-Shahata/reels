@@ -339,7 +339,6 @@ export abstract class BaseJobConsumer<TPayload = unknown> {
     const record = {
       timestamp: new Date().toISOString(),
       event,
-      jobId: meta.jobId,
       videoId: meta.videoId ?? null,
       stage: meta.stage ?? this.queue,
       workerId: this.workerId,

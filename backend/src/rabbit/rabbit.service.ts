@@ -11,7 +11,7 @@ import amqp, {
 } from 'amqp-connection-manager';
 import type { ConfirmChannel, ConsumeMessage, Options } from 'amqplib';
 import type { Env } from '../config/env.schema';
-import { REELS_EXCHANGES, REELS_QUEUES } from './rabbit.constants';
+import { REELS_QUEUES } from './rabbit.constants';
 import { assertRabbitTopology } from './rabbit-topology';
 
 export type MessageHandler<T = unknown> = (
@@ -114,8 +114,8 @@ export class RabbitService implements OnModuleInit, OnModuleDestroy {
     return this.connection?.isConnected() ?? false;
   }
 
-  async checkHealth(): Promise<boolean> {
-    return this.isConnected();
+  checkHealth(): Promise<boolean> {
+    return Promise.resolve(this.isConnected());
   }
 
   async inspectQueues(): Promise<QueuesReport> {
@@ -136,7 +136,9 @@ export class RabbitService implements OnModuleInit, OnModuleDestroy {
           consumerCount: info.consumerCount,
         });
       } catch (err) {
-        this.logger.warn(`Could not check queue ${q}: ${(err as Error).message}`);
+        this.logger.warn(
+          `Could not check queue ${q}: ${(err as Error).message}`,
+        );
       }
 
       const dlq = `${q}.dlq`;
@@ -150,7 +152,9 @@ export class RabbitService implements OnModuleInit, OnModuleDestroy {
         });
         totalDeadLetters += dlqInfo.messageCount;
       } catch (err) {
-        this.logger.warn(`Could not check DLQ ${dlq}: ${(err as Error).message}`);
+        this.logger.warn(
+          `Could not check DLQ ${dlq}: ${(err as Error).message}`,
+        );
       }
     }
 

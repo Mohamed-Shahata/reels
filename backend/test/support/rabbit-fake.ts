@@ -37,7 +37,12 @@ export class RabbitFake {
   }
 
   async inspectQueues(): Promise<{
-    queues: { queue: string; isDlq: boolean; messageCount: number; consumerCount: number }[];
+    queues: {
+      queue: string;
+      isDlq: boolean;
+      messageCount: number;
+      consumerCount: number;
+    }[];
     totalDeadLetters: number;
     alert: boolean;
   }> {

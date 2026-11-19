@@ -79,6 +79,7 @@ export function createPrismaFake() {
   const sessions: StoredSession[] = [];
   const videos: StoredVideo[] = [];
   const clips: StoredClip[] = [];
+  const clipRenders: any[] = [];
   const usageRecords: StoredUsageRecord[] = [];
   const segmentationRuns: StoredSegmentationRun[] = [];
   const processingJobs: StoredProcessingJob[] = [];
@@ -359,6 +360,32 @@ export function createPrismaFake() {
         clips.splice(0, clips.length, ...remainingClips);
         return Promise.resolve(video);
       }),
+      count: jest.fn(
+        ({
+          where,
+        }: {
+          where?: {
+            userId?: string;
+            status?: any;
+            deletedAt?: any;
+          };
+        } = {}) =>
+          Promise.resolve(
+            videos.filter((v) => {
+              if (where?.userId && v.userId !== where.userId) return false;
+              if (where?.status?.in && !where.status.in.includes(v.status))
+                return false;
+              if (
+                where?.status &&
+                typeof where.status === 'string' &&
+                v.status !== where.status
+              )
+                return false;
+              if (where?.deletedAt === null && v.deletedAt) return false;
+              return true;
+            }).length,
+          ),
+      ),
     },
     clip: {
       create: jest.fn(
@@ -527,6 +554,30 @@ export function createPrismaFake() {
         const [clip] = clips.splice(index, 1);
         return Promise.resolve(clip);
       }),
+    },
+    clipRender: {
+      create: jest.fn(({ data }: { data: any }) => {
+        const item = {
+          id: `render-${clipRenders.length + 1}`,
+          status: 'PENDING',
+          progress: 0,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...data,
+        };
+        clipRenders.push(item);
+        return Promise.resolve(item);
+      }),
+      findMany: jest.fn(() => Promise.resolve(clipRenders)),
+      count: jest.fn(({ where }: { where?: any } = {}) =>
+        Promise.resolve(
+          clipRenders.filter((r) => {
+            if (where?.status?.in && !where.status.in.includes(r.status))
+              return false;
+            return true;
+          }).length,
+        ),
+      ),
     },
     usageRecord: {
       findUnique: jest.fn(
@@ -836,10 +887,15 @@ export function createPrismaFake() {
           ),
       ),
       findMany: jest.fn(
-        ({ where }: { where?: { videoId?: string; status?: any } }) =>
+        ({
+          where,
+        }: {
+          where?: { userId?: string; videoId?: string; status?: any };
+        } = {}) =>
           Promise.resolve(
             mediaAssets.filter(
               (a) =>
+                (where?.userId === undefined || a.userId === where.userId) &&
                 (where?.videoId === undefined || a.videoId === where.videoId) &&
                 (where?.status === undefined || a.status === where.status),
             ),
