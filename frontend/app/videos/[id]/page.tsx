@@ -206,6 +206,7 @@ export default function VideoWorkspacePage() {
         videoPlaybackUrl={playbackUrl}
         reframePlan={reframePlan}
         contentType={video?.contentType}
+        transcriptSegments={transcript?.segments}
         onSave={handleSaveClip}
         onExport={handleOpenExport}
       />
