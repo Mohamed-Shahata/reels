@@ -133,7 +133,9 @@ export function PipelineStepper({
             <AlertCircleIcon className="w-4 h-4 shrink-0" />
             <span>
               {failedStage.errorCode
-                ? t('pipeline.stageError', { error: failedStage.errorCode })
+                ? t(`errors.${failedStage.errorCode}`) !== `errors.${failedStage.errorCode}`
+                  ? t(`errors.${failedStage.errorCode}`)
+                  : t('pipeline.stageError', { error: failedStage.errorCode })
                 : t('pipeline.failed')}
             </span>
           </div>
