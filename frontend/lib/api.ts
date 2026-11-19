@@ -73,14 +73,21 @@ const completedVideoSchema = z.object({
   status: z.enum(['READY', 'UPLOADED']),
 });
 
-const videoStatusSchema = z.enum(['UPLOADING', 'READY', 'FAILED']);
+const videoStatusSchema = z.enum([
+  'UPLOADING',
+  'UPLOADED',
+  'PROCESSING',
+  'READY',
+  'FAILED',
+  'DELETING',
+]);
 
 const libraryVideoSchema = z.object({
   id: z.string(),
   title: z.string(),
-  cloudinaryId: z.string().nullable(),
-  durationSec: z.number().positive().nullable(),
-  sizeBytes: z.string().nullable(),
+  cloudinaryId: z.string().nullish().default(''),
+  durationSec: z.number().min(0).nullable().optional(),
+  sizeBytes: z.union([z.string(), z.number()]).nullable().optional(),
   status: videoStatusSchema,
   createdAt: z.string(),
 });
