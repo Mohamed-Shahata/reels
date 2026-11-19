@@ -22,6 +22,8 @@ interface ClipsGridProps {
   onRenameClip?: (clip: Clip, newTitle: string) => Promise<boolean>;
   onExportAll?: () => void;
   isExportingAll?: boolean;
+  onGenerateAiClips?: () => void;
+  isGeneratingClips?: boolean;
   renderReel?: (
     clip: Clip,
     aspect: ReelAspect,
@@ -42,6 +44,8 @@ export function ClipsGrid({
   onRenameClip,
   onExportAll,
   isExportingAll = false,
+  onGenerateAiClips,
+  isGeneratingClips = false,
   renderReel,
 }: ClipsGridProps) {
   const { t } = useLanguage();
@@ -52,6 +56,22 @@ export function ClipsGrid({
         icon={<FilmIcon className="w-8 h-8" />}
         title={t('workspace.noClipsTitle')}
         description={t('workspace.noClipsDescription')}
+        action={
+          onGenerateAiClips ? (
+            <Button
+              onClick={onGenerateAiClips}
+              disabled={isGeneratingClips}
+              className="flex items-center gap-2"
+            >
+              <SparklesIcon className="w-4 h-4" />
+              <span>
+                {isGeneratingClips
+                  ? 'جاري استخراج المقاطع...'
+                  : t('workspace.aiClipsTitle')}
+              </span>
+            </Button>
+          ) : undefined
+        }
         className="py-12 border border-dashed border-border rounded-xl"
       />
     );

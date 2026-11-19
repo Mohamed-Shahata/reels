@@ -140,6 +140,21 @@ export function useVideo(videoId: string) {
     [],
   );
 
+  const [isGeneratingClips, setIsGeneratingClips] = useState(false);
+
+  const generateAiClips = useCallback(async () => {
+    if (!videoId) return;
+    setIsGeneratingClips(true);
+    try {
+      const generated = await api.createAiClips(videoId);
+      setClips(generated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate clips');
+    } finally {
+      setIsGeneratingClips(false);
+    }
+  }, [videoId]);
+
   return {
     video,
     clips,
@@ -150,6 +165,8 @@ export function useVideo(videoId: string) {
     isLoading,
     error,
     isRetryingStage,
+    isGeneratingClips,
+    generateAiClips,
     refreshVideo,
     pollNow,
     retryStage,

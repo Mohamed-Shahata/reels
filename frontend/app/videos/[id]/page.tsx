@@ -47,6 +47,8 @@ export default function VideoWorkspacePage() {
     reframePlan,
     isLoading,
     isRetryingStage,
+    isGeneratingClips,
+    generateAiClips,
     retryStage,
     deleteClip,
     renameClip,
@@ -184,6 +186,8 @@ export default function VideoWorkspacePage() {
                 }}
                 onExportAll={handleExportAll}
                 isExportingAll={isExportingAll}
+                onGenerateAiClips={generateAiClips}
+                isGeneratingClips={isGeneratingClips}
               />
             )}
           </TabsContent>
