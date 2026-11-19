@@ -13,6 +13,15 @@ jobs:
         working-directory: backend
     env:
       DATABASE_URL: postgresql://podcast:podcast@localhost:5432/podcast_reels
+      RABBITMQ_URL: amqp://guest:guest@localhost:5672
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: reels-media
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_FORCE_PATH_STYLE: "true"
+      JWT_ACCESS_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      JWT_REFRESH_SECRET: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
     services:
       postgres:
         image: postgres:16-alpine
@@ -27,6 +36,27 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3.13-management
+        env:
+          RABBITMQ_DEFAULT_USER: guest
+          RABBITMQ_DEFAULT_PASS: guest
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          server /data
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -42,6 +72,7 @@ jobs:
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:integration
       - run: npm run test:e2e
       - run: npm run build
 
@@ -60,8 +91,17 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+      - name: Color Guard Check
+        run: node scripts/check-colors.mjs
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+
+  analyzer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Analyzer Docker Image
+        run: docker build -t podcast-reels-analyzer:latest ./analyzer
