@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
+import { ProcessingModule } from '../processing/processing.module';
 import { StorageModule } from '../storage/storage.module';
 import { SegmentationModule } from '../segmentation/segmentation.module';
 import { UsageModule } from '../usage/usage.module';
@@ -11,6 +12,7 @@ import { ClipsService } from './clips.service';
 @Module({
   imports: [
     PrismaModule,
+    ProcessingModule,
     StorageModule,
     SegmentationModule,
     UsageModule,

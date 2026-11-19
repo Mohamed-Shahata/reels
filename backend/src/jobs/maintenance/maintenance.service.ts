@@ -7,9 +7,9 @@ import {
 import { readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PrismaService } from '../../prisma/prisma.service';
-import type { S3StorageService } from '../../storage/s3-storage.service';
-import type { ProcessingJobsService } from '../../processing/processing-jobs.service';
+import { PrismaService } from '../../prisma/prisma.service';
+import { S3StorageService } from '../../storage/s3-storage.service';
+import { ProcessingJobsService } from '../../processing/processing-jobs.service';
 import { withAdvisoryLock } from '../helpers/advisory-lock.helper';
 
 export const MAINTENANCE_LOCK_IDS = {

@@ -8,6 +8,8 @@ import { Public } from '../../src/auth/public.decorator';
 import { configureApp } from '../../src/app.setup';
 import type { ErrorResponseBody } from '../../src/common/filters/all-exceptions.filter';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { RabbitService } from '../../src/rabbit/rabbit.service';
+import { createRabbitFake } from '../support/rabbit-fake';
 
 class SampleDto {
   @IsEmail()
@@ -41,8 +43,15 @@ describe('API foundations (e2e)', () => {
         $queryRaw: queryRaw,
         $connect: jest.fn(),
         $disconnect: jest.fn(),
+        $transaction: jest.fn((cb) => {
+          if (typeof cb === 'function') return cb({ $queryRaw: queryRaw });
+          return [];
+        }),
         processingJob: { findMany: jest.fn().mockResolvedValue([]) },
+        outboxEvent: { update: jest.fn() },
       })
+      .overrideProvider(RabbitService)
+      .useValue(createRabbitFake())
       .compile();
 
     app = moduleRef.createNestApplication();

@@ -19,6 +19,7 @@ export interface StoredVideo {
   status: 'UPLOADING' | 'READY' | 'FAILED';
   createdAt: Date;
   updatedAt: Date;
+  deletedAt?: Date | null;
   durationSec?: number;
   sizeBytes?: bigint;
 }
@@ -81,6 +82,8 @@ export function createPrismaFake() {
   const usageRecords: StoredUsageRecord[] = [];
   const segmentationRuns: StoredSegmentationRun[] = [];
   const processingJobs: StoredProcessingJob[] = [];
+  const outboxEvents: any[] = [];
+  const mediaAssets: any[] = [];
 
   const fake = {
     store,
@@ -90,7 +93,6 @@ export function createPrismaFake() {
     usageRecords,
     segmentationRuns,
     processingJobs,
-    $queryRaw: jest.fn().mockResolvedValue([{ '?column?': 1 }]),
     $connect: jest.fn(),
     $disconnect: jest.fn(),
     session: {
@@ -201,8 +203,8 @@ export function createPrismaFake() {
           data,
           select,
         }: {
-          data: { userId: string; title: string };
-          select: Record<string, boolean>;
+          data: Pick<StoredVideo, 'userId' | 'title'> & Partial<StoredVideo>;
+          select?: Record<string, boolean>;
         }) => {
           const now = new Date();
           const video: StoredVideo = {
@@ -214,9 +216,11 @@ export function createPrismaFake() {
           };
           videos.push(video);
           return Promise.resolve(
-            Object.fromEntries(
-              Object.entries(video).filter(([key]) => select[key]),
-            ),
+            select
+              ? Object.fromEntries(
+                  Object.entries(video).filter(([key]) => select[key]),
+                )
+              : video,
           );
         },
       ),
@@ -298,7 +302,10 @@ export function createPrismaFake() {
         }: {
           where: { id: string };
           data: Partial<
-            Pick<StoredVideo, 'durationSec' | 'sizeBytes' | 'status' | 'title'>
+            Pick<
+              StoredVideo,
+              'durationSec' | 'sizeBytes' | 'status' | 'title' | 'deletedAt'
+            >
           >;
           select?: Record<string, boolean>;
         }) => {
@@ -415,7 +422,7 @@ export function createPrismaFake() {
           select,
         }: {
           where: { videoId: string };
-          select: Record<string, boolean>;
+          select?: Record<string, boolean>;
         }) =>
           Promise.resolve(
             clips
@@ -423,9 +430,11 @@ export function createPrismaFake() {
               .slice()
               .sort((left, right) => left.startSec - right.startSec)
               .map((clip) =>
-                Object.fromEntries(
-                  Object.entries(clip).filter(([key]) => select[key]),
-                ),
+                select
+                  ? Object.fromEntries(
+                      Object.entries(clip).filter(([key]) => select[key]),
+                    )
+                  : clip,
               ),
           ),
       ),
@@ -739,6 +748,149 @@ export function createPrismaFake() {
         },
       ),
     },
+    outboxEvent: {
+      create: jest.fn(
+        ({
+          data,
+        }: {
+          data: {
+            eventType: string;
+            routingKey: string;
+            payload: unknown;
+          };
+        }) => {
+          const now = new Date();
+          const ev = {
+            id: `outbox-${outboxEvents.length + 1}`,
+            attempts: 0,
+            publishedAt: null,
+            createdAt: now,
+            updatedAt: now,
+            ...data,
+          };
+          outboxEvents.push(ev);
+          return Promise.resolve(ev);
+        },
+      ),
+      findMany: jest.fn(() => Promise.resolve(outboxEvents)),
+      update: jest.fn(
+        ({
+          where,
+          data,
+        }: {
+          where: { id: string };
+          data: {
+            publishedAt?: Date | null;
+            attempts?: { increment: number };
+          };
+        }) => {
+          const ev = outboxEvents.find((item) => item.id === where.id);
+          if (!ev) throw new Error('Outbox event not found');
+          if (data.publishedAt !== undefined) ev.publishedAt = data.publishedAt;
+          if (data.attempts?.increment) ev.attempts += data.attempts.increment;
+          ev.updatedAt = new Date();
+          return Promise.resolve(ev);
+        },
+      ),
+    },
+    mediaAsset: {
+      upsert: jest.fn(
+        ({
+          where,
+          create,
+          update,
+        }: {
+          where: { storageKey: string };
+          create: any;
+          update: any;
+        }) => {
+          let asset = mediaAssets.find(
+            (a) => a.storageKey === where.storageKey,
+          );
+          if (asset) {
+            Object.assign(asset, update, { updatedAt: new Date() });
+          } else {
+            asset = {
+              id: `asset-${mediaAssets.length + 1}`,
+              status: 'PENDING',
+              sizeBytes: null,
+              contentType: null,
+              expiresAt: null,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+              ...create,
+            };
+            mediaAssets.push(asset);
+          }
+          return Promise.resolve(asset);
+        },
+      ),
+      findUnique: jest.fn(
+        ({ where }: { where: { id?: string; storageKey?: string } }) =>
+          Promise.resolve(
+            mediaAssets.find(
+              (a) =>
+                (where.id && a.id === where.id) ||
+                (where.storageKey && a.storageKey === where.storageKey),
+            ) ?? null,
+          ),
+      ),
+      findMany: jest.fn(
+        ({ where }: { where?: { videoId?: string; status?: any } }) =>
+          Promise.resolve(
+            mediaAssets.filter(
+              (a) =>
+                (where?.videoId === undefined || a.videoId === where.videoId) &&
+                (where?.status === undefined || a.status === where.status),
+            ),
+          ),
+      ),
+      update: jest.fn(
+        ({ where, data }: { where: { id: string }; data: any }) => {
+          const asset = mediaAssets.find((a) => a.id === where.id);
+          if (!asset) throw new Error('MediaAsset not found');
+          Object.assign(asset, data, { updatedAt: new Date() });
+          return Promise.resolve(asset);
+        },
+      ),
+      deleteMany: jest.fn(
+        ({
+          where,
+        }: {
+          where?: { id?: { in: string[] }; videoId?: string };
+        }) => {
+          const before = mediaAssets.length;
+          const kept = mediaAssets.filter((a) => {
+            if (where?.id?.in && where.id.in.includes(a.id)) return false;
+            if (where?.videoId && a.videoId === where.videoId) return false;
+            return true;
+          });
+          mediaAssets.length = 0;
+          mediaAssets.push(...kept);
+          return Promise.resolve({ count: before - mediaAssets.length });
+        },
+      ),
+    },
+    $queryRaw: jest.fn((query: unknown) => {
+      const qStr = Array.isArray(query)
+        ? (query as string[]).join(' ')
+        : typeof query === 'string'
+          ? query
+          : JSON.stringify(query || '');
+      if (qStr.includes('OutboxEvent')) {
+        return Promise.resolve(
+          outboxEvents
+            .filter((e) => e.publishedAt === null)
+            .map((e) => ({
+              id: e.id,
+              routingKey: e.routingKey,
+              payload: e.payload,
+              attempts: e.attempts,
+            })),
+        );
+      }
+      return Promise.resolve([{ '?column?': 1 }]);
+    }),
   };
 
   return Object.assign(fake, {

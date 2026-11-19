@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import type { PrismaService } from '../../prisma/prisma.service';
+import { PrismaService } from '../../prisma/prisma.service';
 import { withAdvisoryLock } from '../helpers/advisory-lock.helper';
 import { jobTypeToRoutingKey } from '../../processing/processing-jobs.service';
 
