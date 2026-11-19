@@ -12,6 +12,7 @@
     "db:up": "docker compose up -d postgres rabbitmq minio minio-init redis",
     "db:down": "docker compose down",
     "dev:backend": "npm --prefix backend run start:dev",
+    "dev:worker": "npm --prefix backend run start:worker:dev",
     "dev:frontend": "npm --prefix frontend run dev",
     "lint": "npm --prefix backend run lint:check && npm --prefix frontend run lint",
     "typecheck": "npm --prefix backend run typecheck && npm --prefix frontend run typecheck",
