@@ -1,23 +1,22 @@
 'use client';
 
+import * as React from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import {
   ApiError,
   api,
   getApiErrorMessage,
-  type Usage,
   type UploadConstraints,
 } from '@/lib/api';
+import { uploadVideoInChunks } from '@/lib/chunked-upload';
 import {
-  uploadVideoInChunks,
-} from '@/lib/chunked-upload';
-import {
-  SPOKEN_LANGUAGES,
   estimateRemaining,
-  formatClock,
   formatFileSize,
   formatResolution,
+  formatClock,
   titleFromFileName,
-  type SpokenLanguage,
+  getTimestamp,
 } from '@/lib/upload-format';
 import {
   clearPendingUpload,
@@ -34,75 +33,76 @@ import { readVideoPreview, type VideoPreview } from '@/lib/video-preview';
 import { useAuth } from '@/components/auth/auth-provider';
 import { PageLoading } from '@/components/common/page-loading';
 import { AppHeader } from '@/components/layout/app-header';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
-  ChangeEvent,
-  DragEvent,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+  Button,
+  Input,
+  Select,
+  Switch,
+  Progress,
+  Badge,
+} from '@/components/ui';
+import { useLanguage } from '@/lib/i18n/language-context';
 
 type UploadState =
-  'idle' | 'creating' | 'uploading' | 'confirming' | 'complete' | 'failed';
+  | 'idle'
+  | 'creating'
+  | 'uploading'
+  | 'confirming'
+  | 'complete'
+  | 'failed';
 
 const TITLE_MAX = 255;
 
 export function UploadVideoForm() {
   const { status } = useAuth();
   const router = useRouter();
-  const abortController = useRef<AbortController | null>(null);
-  const fileInput = useRef<HTMLInputElement | null>(null);
-  const startedAt = useRef<number>(0);
-  const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<VideoPreview | null>(null);
-  const [title, setTitle] = useState('');
-  const [language, setLanguage] = useState<SpokenLanguage>('ar');
-  const [autoClips, setAutoClips] = useState(true);
-  const [dragging, setDragging] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [state, setState] = useState<UploadState>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [pendingUpload, setPendingUpload] = useState<PendingUpload | null>(
+  const { t, language } = useLanguage();
+
+  const abortController = React.useRef<AbortController | null>(null);
+  const fileInput = React.useRef<HTMLInputElement | null>(null);
+  const startedAt = React.useRef<number>(0);
+
+  const [file, setFile] = React.useState<File | null>(null);
+  const [preview, setPreview] = React.useState<VideoPreview | null>(null);
+  const [title, setTitle] = React.useState('');
+  const [contentType, setContentType] = React.useState<'PODCAST' | 'SOLO'>(
+    'PODCAST',
+  );
+  const [spokenLang, setSpokenLang] = React.useState<'ar' | 'en'>('ar');
+  const [autoClips, setAutoClips] = React.useState(true);
+  const [dragging, setDragging] = React.useState(false);
+  const [progress, setProgress] = React.useState(0);
+  const [state, setState] = React.useState<UploadState>('idle');
+  const [error, setError] = React.useState<string | null>(null);
+  const [pendingUpload, setPendingUpload] = React.useState<PendingUpload | null>(
     null,
   );
-  const [transferStatus, setTransferStatus] = useState('');
-  const [remaining, setRemaining] = useState<string | null>(null);
-  const [usage, setUsage] = useState<Usage | null>(null);
-  const [constraints, setConstraints] = useState<UploadConstraints | null>(
+  const [transferStatus, setTransferStatus] = React.useState('');
+  const [remaining, setRemaining] = React.useState<string | null>(null);
+  const [constraints, setConstraints] = React.useState<UploadConstraints | null>(
     null,
   );
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (status === 'unauthenticated') router.replace('/login');
   }, [router, status]);
 
-  const loadConstraints = useCallback(async () => {
+  const loadConstraints = React.useCallback(async () => {
     setError(null);
     try {
       setConstraints(await api.getVideoUploadConstraints());
     } catch (requestError) {
       setError(
-        getApiErrorMessage(
-          requestError,
-          'Upload settings could not be loaded.',
-        ),
+        getApiErrorMessage(requestError, 'Upload settings could not be loaded.'),
       );
     }
   }, []);
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (status !== 'authenticated') return;
     const timer = window.setTimeout(() => {
       void loadConstraints();
-      api
-        .getUsage()
-        .then(setUsage)
-        .catch(() => setUsage(null));
     }, 0);
-
     return () => window.clearTimeout(timer);
   }, [loadConstraints, status]);
 
@@ -124,7 +124,11 @@ export function UploadVideoForm() {
     setState('idle');
 
     if (!constraints) {
-      setError('Upload settings are still loading. Try again in a moment.');
+      setError(
+        language === 'ar'
+          ? 'إعدادات الرفع قيد التحميل. حاول مجدداً بعد لحظات.'
+          : 'Upload settings are still loading. Try again in a moment.',
+      );
       return;
     }
 
@@ -166,7 +170,7 @@ export function UploadVideoForm() {
     );
   }
 
-  function selectFile(event: ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files?.[0];
     if (!selected) {
       resetFile();
@@ -175,7 +179,7 @@ export function UploadVideoForm() {
     void processFile(selected);
   }
 
-  function dropFile(event: DragEvent<HTMLElement>) {
+  function handleDrop(event: React.DragEvent<HTMLElement>) {
     event.preventDefault();
     setDragging(false);
     if (busy || !constraints) return;
@@ -189,7 +193,7 @@ export function UploadVideoForm() {
     setError(null);
     setTransferStatus('');
     setState('creating');
-    startedAt.current = currentTime();
+    startedAt.current = getTimestamp();
     const controller = new AbortController();
     abortController.current = controller;
 
@@ -216,8 +220,9 @@ export function UploadVideoForm() {
 
       if (!activeUpload) {
         const created = await api.createVideo(title.trim(), {
-          language,
+          language: spokenLang,
           autoClips,
+          contentType,
           filename: file.name,
           contentTypeHeader: file.type || 'video/mp4',
           sizeBytes: file.size,
@@ -234,11 +239,8 @@ export function UploadVideoForm() {
         setPendingUpload(activeUpload);
       }
 
-      if (!upload) {
+      if (!upload || !activeUpload) {
         throw new Error('Upload could not be prepared.');
-      }
-      if (!activeUpload) {
-        throw new Error('Upload state was lost.');
       }
       const uploadState = activeUpload;
 
@@ -254,6 +256,7 @@ export function UploadVideoForm() {
         clearPendingUpload(file);
         setPendingUpload(null);
         setState('complete');
+        router.push(`/videos/${uploadState.videoId}`);
         return;
       }
 
@@ -270,11 +273,15 @@ export function UploadVideoForm() {
         onProgress: (percent) => {
           setProgress(percent);
           setRemaining(
-            estimateRemaining(currentTime() - startedAt.current, percent),
+            estimateRemaining(getTimestamp() - startedAt.current, percent),
           );
         },
         onRetry: (attempt) =>
-          setTransferStatus(`Reconnecting (attempt ${attempt} of 3)`),
+          setTransferStatus(
+            language === 'ar'
+              ? `إعادة الاتصال (المحاولة ${attempt} من 3)`
+              : `Reconnecting (attempt ${attempt} of 3)`,
+          ),
         signal: controller.signal,
       });
 
@@ -299,13 +306,16 @@ export function UploadVideoForm() {
       setTransferStatus('');
       setRemaining(null);
       setState('complete');
+      router.push(`/videos/${completedUpload.videoId}`);
     } catch (uploadError) {
       if (
         uploadError instanceof DOMException &&
         uploadError.name === 'AbortError'
       ) {
         setTransferStatus(
-          'Upload paused. Choose this same file to resume later.',
+          language === 'ar'
+            ? 'تم إيقاف الرفع مؤقتاً. يمكنك استئنافه لاحقاً.'
+            : 'Upload paused. Choose this same file to resume later.',
         );
         setRemaining(null);
         setState('idle');
@@ -320,8 +330,16 @@ export function UploadVideoForm() {
     }
   }
 
+  function pauseUpload() {
+    abortController.current?.abort();
+  }
+
   function cancelUpload() {
     abortController.current?.abort();
+    if (file) {
+      clearPendingUpload(file);
+    }
+    resetFile();
   }
 
   async function confirmUpload(
@@ -342,14 +360,19 @@ export function UploadVideoForm() {
           throw confirmError;
         }
 
-        setTransferStatus('Finalizing upload. Retrying confirmation...');
-        await delay(2000, signal);
+        setTransferStatus(
+          language === 'ar'
+            ? 'جاري تأكيد الرفع ومعالجة الملف...'
+            : 'Finalizing upload. Retrying confirmation...',
+        );
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
       }
     }
   }
 
   if (status === 'loading') {
-    return <PageLoading label="Loading upload page..." />;
+    return <PageLoading label={t('common.loading')} />;
   }
 
   if (status !== 'authenticated') {
@@ -361,368 +384,345 @@ export function UploadVideoForm() {
   const canResume = pendingUpload !== null;
   const resolution = formatResolution(preview?.height ?? null);
   const extension = file?.name.split('.').pop()?.toUpperCase() ?? '';
-  const aiLeft = usage ? Math.max(0, usage.aiRunLimit - usage.aiRuns) : null;
-  const selectedLanguage =
-    SPOKEN_LANGUAGES.find((item) => item.id === language) ??
-    SPOKEN_LANGUAGES[0];
 
   return (
-    <div className="flex min-h-screen flex-col bg-[#f2f9f6] text-[#172321]">
+    <div className="flex min-h-screen flex-col bg-bg text-text">
       <AppHeader />
-      <main className="mx-auto w-full max-w-2xl flex-1 px-5 py-8 sm:px-8">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+
+      <main className="mx-auto w-full max-w-2xl flex-1 px-4 sm:px-8 py-8 space-y-8">
+        {/* Top navigation link */}
+        <div className="flex items-center justify-between">
           <Link
-            className="text-sm font-medium text-[#0f766e] hover:underline"
+            className="text-xs sm:text-sm font-medium text-accent hover:underline flex items-center gap-1.5"
             href="/"
           >
-            ← Back to workspace
+            <span aria-hidden="true">{language === 'ar' ? '→' : '←'}</span>
+            <span>{t('upload.backToWorkspace')}</span>
           </Link>
-          {usage && aiLeft !== null ? (
-            <span className="rounded-full border border-[#cfe3dc] bg-white px-3 py-1 font-mono text-[11px] text-[#5d6d68]">
-              <span className="mr-1.5 text-[#10b981]">●</span>
-              AI Runs Available:{' '}
-              <strong className="text-[#0f766e]">
-                {aiLeft} of {usage.aiRunLimit}
-              </strong>{' '}
-              this month
-            </span>
-          ) : null}
         </div>
 
-        <h1 className="mt-6 text-3xl font-bold">Upload a podcast video</h1>
-        <p className="mt-2 max-w-xl text-sm leading-6 text-[#5d6d68]">
-          Upload your full-length podcast episode to auto-generate Arabic clips,
-          transcripts, and vertical reels. Your file goes straight to secure
-          storage while this page tracks its progress.
-        </p>
+        {/* Page Header */}
+        <div className="space-y-1.5">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-text">
+            {t('upload.uploadPodcastVideo')}
+          </h1>
+          <p className="text-sm text-muted leading-relaxed">
+            {language === 'ar'
+              ? 'ارفع بودكاست أو فيديو طويل، وسيقوم الذكاء الاصطناعي بتوليد الترجمة واقتراح مقاطع ريلز عمودية 9:16.'
+              : 'Upload your podcast or video episode to generate Arabic clips, word-level transcripts, and vertical reels.'}
+          </p>
+        </div>
 
+        {/* Error Alert */}
+        {error && (
+          <div
+            className="rounded-xl border border-danger/30 bg-danger-soft p-4 text-sm text-danger flex items-center justify-between"
+            role="alert"
+          >
+            <span>{error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="text-xs underline hover:opacity-80 ms-3 shrink-0"
+            >
+              {t('common.close')}
+            </button>
+          </div>
+        )}
+
+        {/* File Dropzone / Picker */}
         <input
-          accept={
-            constraints
-              ? constraints.allowedFormats
-                  .map((format) => `.${format}`)
-                  .join(',')
-              : 'video/*'
-          }
+          accept={constraints?.allowedFormats.map((f) => `.${f}`).join(',') ?? '.mp4,.mov,.webm,.mkv'}
           className="sr-only"
-          data-testid="video-file-input"
-          disabled={busy || !constraints}
-          id="video-file"
-          onChange={selectFile}
+          disabled={busy}
+          id="video-file-input"
+          onChange={handleFileChange}
           ref={fileInput}
-          tabIndex={-1}
           type="file"
         />
 
-        {file ? (
-          <section
-            aria-label="Selected video"
-            className="mt-6 flex items-center gap-4 rounded-xl border border-[#dfe6e2] bg-white p-4"
-          >
-            <div className="relative h-16 w-28 shrink-0 overflow-hidden rounded-lg bg-[#123b3a]">
-              {preview?.thumbnail ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  alt=""
-                  className="h-full w-full object-cover"
-                  src={preview.thumbnail}
-                />
-              ) : null}
-              <span className="absolute left-1 top-1 rounded bg-[#0f766e] px-1 font-mono text-[9px] font-semibold text-white">
-                {[extension, resolution].filter(Boolean).join(' · ')}
-              </span>
-              {preview ? (
-                <span className="absolute bottom-1 right-1 rounded bg-black/70 px-1 font-mono text-[9px] text-white">
-                  {formatClock(preview.durationSec)}
-                </span>
-              ) : null}
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold" dir="auto">
-                {file.name}
-              </p>
-              <p className="mt-1 text-xs text-[#5d6d68]">
-                {formatFileSize(file.size)}
-                {remaining ? ` · ${remaining}` : ''}
-              </p>
-            </div>
-            <button
-              aria-label="Remove video"
-              className="flex h-9 w-9 items-center justify-center rounded-md text-[#5d6d68] hover:bg-[#fff2ef] hover:text-[#b42318] disabled:opacity-40"
-              disabled={busy}
-              onClick={resetFile}
-              type="button"
-            >
-              <svg
-                aria-hidden="true"
-                fill="none"
-                height="18"
-                stroke="currentColor"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="1.8"
-                viewBox="0 0 24 24"
-                width="18"
-              >
-                <path d="M3 6h18" />
-                <path d="M8 6V4h8v2" />
-                <path d="M6 6l1 14h10l1-14" />
-              </svg>
-            </button>
-          </section>
-        ) : (
+        {!file ? (
           <label
-            className={`mt-6 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-12 text-center transition ${
+            className={`flex flex-col items-center justify-center p-8 sm:p-12 border-2 border-dashed rounded-2xl cursor-pointer transition-all duration-150 select-none ${
               dragging
-                ? 'border-[#0f766e] bg-[#e4f3ef]'
-                : 'border-[#b5cbc3] bg-white hover:border-[#0f766e]'
-            } ${!constraints ? 'cursor-not-allowed opacity-60' : ''}`}
-            htmlFor="video-file"
+                ? 'border-accent bg-accent-soft/30 scale-[1.01]'
+                : 'border-border hover:border-border-strong bg-surface/50 hover:bg-surface'
+            } ${busy ? 'opacity-50 pointer-events-none' : ''}`}
+            htmlFor="video-file-input"
             onDragLeave={() => setDragging(false)}
-            onDragOver={(event) => {
-              event.preventDefault();
+            onDragOver={(e) => {
+              e.preventDefault();
               setDragging(true);
             }}
-            onDrop={dropFile}
+            onDrop={handleDrop}
           >
-            <span
-              aria-hidden="true"
-              className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e4f3ef] text-2xl text-[#0f766e]"
-            >
-              ↑
-            </span>
-            <span className="mt-3 text-sm font-semibold">
-              Drop your podcast video here, or click to browse
-            </span>
-            <span className="mt-1 text-xs text-[#5d6d68]">
-              {constraints
-                ? `${constraints.allowedFormats.join(', ').toUpperCase()} · up to ${formatFileSize(constraints.maxFileSizeBytes)} · up to ${Math.round(constraints.maxDurationSec / 60)} min`
-                : 'Loading upload settings...'}
-            </span>
-          </label>
-        )}
-
-        {file ? (
-          <section className="mt-5 rounded-xl border border-[#dfe6e2] bg-white p-5">
-            <div className="flex items-baseline justify-between">
-              <label className="text-sm font-semibold" htmlFor="video-title">
-                Video Title{' '}
-                <span className="font-normal text-[#5d6d68]">
-                  (for AI clip generation &amp; transcript)
-                </span>
-              </label>
-              <span
-                className="font-[family-name:var(--font-cairo)] text-[11px] text-[#5d6d68]"
-                dir="rtl"
-                lang="ar"
-              >
-                العنوان باللغة العربية
-              </span>
-            </div>
-            <input
-              className="mt-2 h-11 w-full rounded-lg border border-[#d5dcd8] px-3 text-base outline-none focus:border-[#0f766e] focus:ring-2 focus:ring-[#0f766e]/20 disabled:bg-[#f4f6f5]"
-              dir="auto"
-              disabled={busy}
-              id="video-title"
-              maxLength={TITLE_MAX}
-              onChange={(event) => setTitle(event.target.value)}
-              value={title}
-            />
-            <div className="mt-1.5 flex justify-between text-[11px] text-[#5d6d68]">
-              <span>Prefilled from filename. Supports Arabic and English.</span>
-              <span className="font-mono">{title.length} chars</span>
+            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-surface-2 border border-border text-muted mb-4 shadow-sm">
+              <UploadCloudIcon />
             </div>
 
-            <label
-              className="mt-5 block text-sm font-semibold"
-              htmlFor="video-language"
-            >
-              Primary Spoken Language &amp; Dialect
-            </label>
-            <select
-              className="mt-2 h-12 w-full rounded-lg border border-[#d5dcd8] bg-[#eef8f4] px-3 text-sm font-medium outline-none focus:border-[#0f766e] focus:ring-2 focus:ring-[#0f766e]/20 disabled:opacity-60"
-              disabled={busy || canResume}
-              id="video-language"
-              onChange={(event) =>
-                setLanguage(event.target.value as SpokenLanguage)
-              }
-              value={language}
-            >
-              {SPOKEN_LANGUAGES.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-            <p
-              className="mt-1 text-[11px] text-[#5d6d68]"
-              dir={language === 'ar' ? 'rtl' : 'ltr'}
-            >
-              {selectedLanguage.native}
+            <p className="text-base font-semibold text-text text-center">
+              {t('upload.dropzone')}
+            </p>
+            <p className="text-xs text-muted mt-2 text-center max-w-sm">
+              {language === 'ar'
+                ? `الصيغ المدعومة: MP4, MOV, WEBM, MKV (الحد الأقصى ${constraints ? Math.round(constraints.maxDurationSec / 60) : 180} دقيقة)`
+                : `Supported formats: MP4, MOV, WEBM, MKV (Up to ${constraints ? Math.round(constraints.maxDurationSec / 60) : 180} mins)`}
             </p>
 
-            <div className="mt-5 flex items-center justify-between gap-4 rounded-lg border border-[#e3e9e6] p-3">
-              <div>
-                <p className="text-sm font-semibold">
-                  Automatic Arabic Hook Detection
+            <div className="mt-6">
+              <span className="inline-flex items-center justify-center font-medium rounded-lg px-4 py-2 text-sm bg-surface-2 border border-border text-text hover:bg-surface hover:border-border-strong transition-colors">
+                {language === 'ar' ? 'اختر ملفاً من جهازك' : 'Choose video file'}
+              </span>
+            </div>
+          </label>
+        ) : (
+          /* Selected File Information Card */
+          <div className="rounded-xl border border-border bg-surface p-4 sm:p-5 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3.5 min-w-0">
+              <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-surface-2 border border-border text-accent shrink-0">
+                <VideoFileIcon />
+              </div>
+              <div className="min-w-0 space-y-1">
+                <p className="text-sm font-semibold text-text truncate">
+                  {file.name}
                 </p>
-                <p className="mt-0.5 text-xs text-[#5d6d68]">
-                  When the transcript is ready, AI picks the strongest moments
-                  and creates vertical clips for you (uses 1 AI run).
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted">
+                  <span>{formatFileSize(file.size)}</span>
+                  {extension && (
+                    <Badge size="sm" variant="default">
+                      {extension}
+                    </Badge>
+                  )}
+                  {preview?.durationSec && (
+                    <span>• {formatClock(preview.durationSec)}</span>
+                  )}
+                  {resolution && <span>• {resolution}</span>}
+                </div>
+              </div>
+            </div>
+
+            {!busy && (
+              <Button onClick={resetFile} size="sm" variant="ghost">
+                {language === 'ar' ? 'تغيير الملف' : 'Change'}
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* Form Options (when file selected) */}
+        {file && (
+          <div className="space-y-6 pt-2">
+            {/* Title field */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-text" htmlFor="video-title">
+                {t('upload.videoTitle')}
+              </label>
+              <Input
+                disabled={busy}
+                id="video-title"
+                maxLength={TITLE_MAX}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={t('upload.videoTitle')}
+                value={title}
+              />
+              <p className="text-[11px] text-muted">{t('upload.prefilledNote')}</p>
+            </div>
+
+            {/* Content Type Selection: 2 Cards (Podcast vs Solo) */}
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-text">
+                {t('upload.contentType')}
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                {/* Podcast Card */}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setContentType('PODCAST')}
+                  className={`text-start p-4 rounded-xl border transition-all duration-150 select-none ${
+                    contentType === 'PODCAST'
+                      ? 'border-accent bg-accent-soft/30 shadow-xs'
+                      : 'border-border bg-surface hover:bg-surface-2'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xl">🎙</span>
+                    {contentType === 'PODCAST' && (
+                      <span className="w-2 h-2 rounded-full bg-accent" />
+                    )}
+                  </div>
+                  <h3 className="mt-2 text-sm font-semibold text-text">
+                    {t('upload.contentTypePodcast')}
+                  </h3>
+                  <p className="mt-1 text-xs text-muted leading-relaxed">
+                    {t('upload.contentTypePodcastDesc')}
+                  </p>
+                </button>
+
+                {/* Solo Card */}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setContentType('SOLO')}
+                  className={`text-start p-4 rounded-xl border transition-all duration-150 select-none ${
+                    contentType === 'SOLO'
+                      ? 'border-accent bg-accent-soft/30 shadow-xs'
+                      : 'border-border bg-surface hover:bg-surface-2'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xl">👤</span>
+                    {contentType === 'SOLO' && (
+                      <span className="w-2 h-2 rounded-full bg-accent" />
+                    )}
+                  </div>
+                  <h3 className="mt-2 text-sm font-semibold text-text">
+                    {t('upload.contentTypeSolo')}
+                  </h3>
+                  <p className="mt-1 text-xs text-muted leading-relaxed">
+                    {t('upload.contentTypeSoloDesc')}
+                  </p>
+                </button>
+              </div>
+            </div>
+
+            {/* Language & Dialect Select */}
+            <div className="space-y-1.5 max-w-xs">
+              <label className="text-xs font-semibold text-text" htmlFor="language-select">
+                {t('upload.spokenLanguage')}
+              </label>
+              <Select
+                disabled={busy}
+                id="language-select"
+                onChange={(e) => setSpokenLang(e.target.value as 'ar' | 'en')}
+                value={spokenLang}
+              >
+                <option value="ar">{language === 'ar' ? 'العربية (كل اللهجات)' : 'Arabic (All Dialects)'}</option>
+                <option value="en">{language === 'ar' ? 'الإنجليزية' : 'English'}</option>
+              </Select>
+            </div>
+
+            {/* Auto-clips Switch */}
+            <div className="flex items-start justify-between gap-4 p-4 rounded-xl border border-border bg-surface">
+              <div className="space-y-0.5">
+                <label className="text-sm font-semibold text-text cursor-pointer" htmlFor="auto-clips-switch">
+                  {t('upload.autoClipsLabel')}
+                </label>
+                <p className="text-xs text-muted leading-relaxed">
+                  {t('upload.autoClipsDesc')}
                 </p>
               </div>
-              <button
-                aria-checked={autoClips}
-                aria-label="Automatic hook detection"
-                className={`relative h-6 w-11 shrink-0 rounded-full transition ${autoClips ? 'bg-[#0f766e]' : 'bg-[#c9d1cd]'} disabled:opacity-50`}
-                disabled={busy || canResume}
-                onClick={() => setAutoClips((value) => !value)}
-                role="switch"
-                type="button"
-              >
-                <span
-                  className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${autoClips ? 'left-[22px]' : 'left-0.5'}`}
-                />
-              </button>
-            </div>
-            {canResume ? (
-              <p className="mt-2 text-[11px] text-[#5d6d68]">
-                Language and detection were saved when this upload started.
-              </p>
-            ) : null}
-          </section>
-        ) : null}
-
-        {busy || state === 'complete' ? (
-          <div
-            aria-live="polite"
-            className="mt-5 rounded-xl border border-[#dfe6e2] bg-white p-4"
-          >
-            <div className="flex justify-between text-sm font-medium">
-              <span>
-                {state === 'complete'
-                  ? 'Uploaded'
-                  : state === 'confirming'
-                    ? 'Confirming upload'
-                    : transferStatus || 'Uploading'}
-              </span>
-              <span>{progress}%</span>
-            </div>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-[#dce6e1]">
-              <div
-                className="h-full rounded-full bg-[#0f766e] transition-[width]"
-                style={{ width: `${progress}%` }}
+              <Switch
+                checked={autoClips}
+                disabled={busy}
+                id="auto-clips-switch"
+                onCheckedChange={setAutoClips}
               />
             </div>
+
+            {/* Upload Progress & Transfer Status Display */}
+            {busy && (
+              <div className="space-y-3 p-4 rounded-xl border border-border bg-surface-2">
+                <div className="flex items-center justify-between text-xs text-muted">
+                  <span className="font-medium text-text">
+                    {state === 'confirming'
+                      ? t('upload.confirmingUpload')
+                      : `${t('upload.uploading')} (${progress}%)`}
+                  </span>
+                  {remaining && <span>{remaining}</span>}
+                </div>
+
+                <Progress
+                  className="h-2.5"
+                  value={progress}
+                  variant={state === 'confirming' ? 'info' : 'accent'}
+                />
+
+                {transferStatus && (
+                  <p className="text-xs text-muted text-center pt-1 animate-pulse">
+                    {transferStatus}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Main Action Buttons */}
+            <div className="pt-2 flex flex-wrap items-center gap-3">
+              {!busy ? (
+                <Button
+                  className="w-full sm:w-auto min-w-44"
+                  disabled={!title.trim()}
+                  onClick={() => void startUpload()}
+                  size="lg"
+                  variant="primary"
+                >
+                  <span className="me-2 text-base leading-none">↑</span>
+                  {canResume ? t('upload.resumeUpload') : t('upload.startUpload')}
+                </Button>
+              ) : (
+                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  <Button
+                    onClick={pauseUpload}
+                    size="md"
+                    variant="secondary"
+                  >
+                    {t('upload.pauseUpload')}
+                  </Button>
+                  <Button
+                    onClick={cancelUpload}
+                    size="md"
+                    variant="danger"
+                  >
+                    {t('upload.cancelUpload')}
+                  </Button>
+                </div>
+              )}
+
+              {canResume && !busy && (
+                <Button onClick={cancelUpload} size="md" variant="ghost">
+                  {language === 'ar' ? 'البدء من جديد' : 'Start Fresh'}
+                </Button>
+              )}
+            </div>
           </div>
-        ) : null}
-
-        {error ? (
-          <p
-            className="mt-5 rounded-lg border-l-2 border-[#c44932] bg-[#fff2ef] px-3 py-2 text-sm text-[#8f2f1f]"
-            role="alert"
-          >
-            {error}
-          </p>
-        ) : null}
-        {state === 'complete' ? (
-          <p className="mt-5 rounded-lg border-l-2 border-[#0f766e] bg-[#eff9f4] px-3 py-2 text-sm text-[#185c4e]">
-            Video is ready.{' '}
-            {autoClips
-              ? 'Transcription has started and clips will be created automatically. '
-              : 'Transcription has started. '}
-            <Link className="font-semibold underline" href="/">
-              Open your workspace
-            </Link>
-            .
-          </p>
-        ) : null}
-        {state === 'idle' && canResume && file ? (
-          <p className="mt-5 rounded-lg border-l-2 border-[#0f766e] bg-[#eff9f4] px-3 py-2 text-sm text-[#185c4e]">
-            A previous upload was found. Continue from {progress}%.
-          </p>
-        ) : null}
-        {state === 'idle' && transferStatus ? (
-          <p className="mt-5 text-sm text-[#5d6d68]">{transferStatus}</p>
-        ) : null}
-
-        {!constraints && !busy ? (
-          <button
-            className="mt-5 h-10 rounded-lg border border-[#a9bab3] px-4 text-sm font-medium text-[#263532] hover:border-[#0f766e] hover:text-[#0f766e]"
-            onClick={() => void loadConstraints()}
-            type="button"
-          >
-            Retry upload settings
-          </button>
-        ) : null}
-
-        <div className="mt-6 flex items-center justify-end gap-3">
-          {busy ? (
-            <button
-              className="h-11 px-4 text-sm font-medium text-[#263532] hover:text-[#8f2f1f]"
-              onClick={cancelUpload}
-              type="button"
-            >
-              Cancel
-            </button>
-          ) : (
-            <Link
-              className="flex h-11 items-center px-4 text-sm font-medium text-[#263532] hover:text-[#0f766e]"
-              href="/"
-            >
-              Cancel
-            </Link>
-          )}
-          <button
-            className="flex h-11 items-center gap-2 rounded-lg bg-[#0f766e] px-5 text-sm font-semibold text-white transition hover:bg-[#0b615b] disabled:cursor-not-allowed disabled:bg-[#8ba7a0]"
-            disabled={
-              !file ||
-              !title.trim() ||
-              !constraints ||
-              busy ||
-              state === 'complete'
-            }
-            onClick={() => void startUpload()}
-            type="button"
-          >
-            {state === 'creating'
-              ? 'Preparing upload'
-              : state === 'uploading'
-                ? 'Uploading video'
-                : state === 'confirming'
-                  ? 'Confirming upload'
-                  : canResume && pendingUpload.nextByte >= (file?.size ?? 0)
-                    ? 'Confirm upload'
-                    : canResume
-                      ? 'Resume upload'
-                      : 'Start upload'}
-          </button>
-        </div>
-
-        <p className="mt-8 rounded-lg border border-[#dfe6e2] bg-white p-3 text-xs leading-5 text-[#5d6d68]">
-          <strong className="text-[#172321]">Creator Tip:</strong> For the most
-          accurate Arabic captions, record with a clean, isolated microphone per
-          speaker. Clear audio gives the transcription model the best results.
-        </p>
+        )}
       </main>
     </div>
   );
 }
 
-function currentTime(): number {
-  return Date.now();
+function UploadCloudIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-8 w-8 text-muted"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.5"
+      viewBox="0 0 24 24"
+    >
+      <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+      <path d="M12 12v9" />
+      <path d="m16 16-4-4-4 4" />
+    </svg>
+  );
 }
 
-function delay(milliseconds: number, signal: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = window.setTimeout(resolve, milliseconds);
-    signal.addEventListener(
-      'abort',
-      () => {
-        window.clearTimeout(timer);
-        reject(new DOMException('Upload cancelled.', 'AbortError'));
-      },
-      { once: true },
-    );
-  });
+function VideoFileIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      className="h-6 w-6 text-accent"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.75"
+      viewBox="0 0 24 24"
+    >
+      <path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5" />
+      <rect height="12" rx="2" width="14" x="2" y="6" />
+    </svg>
+  );
 }

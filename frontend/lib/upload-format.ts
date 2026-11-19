@@ -54,3 +54,7 @@ export function titleFromFileName(fileName: string): string {
       .trim() || 'Untitled video'
   );
 }
+
+export function getTimestamp(): number {
+  return Date.now();
+}
